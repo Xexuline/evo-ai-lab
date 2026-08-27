@@ -22,6 +22,10 @@ El servicio expone una API compatible con OpenAI en `http://<EVO_IP>:8080/v1` de
 
 Las copias reproducibles del perfil activo están en [scripts/llama-qwen38.sh](scripts/llama-qwen38.sh) y [systemd/llama-qwen38.service](systemd/llama-qwen38.service). No incluyen el modelo; este repositorio nunca versiona modelos ni credenciales.
 
-## Próximo paso corto
+## Model manager v1 (pendiente de despliegue)
 
-Definir perfiles declarativos y construir `evo-model` para cargar, detener y consultar modelos sin convertir el EVO en el servidor de todos los servicios auxiliares.
+El repositorio contiene una primera implementación de
+[`evo-model`](tools/model-manager/README.md): perfiles declarativos, una unidad
+genérica de usuario y una CLI local para seleccionar, cargar, detener y revisar
+un único modelo. No está instalada ni sustituye al servicio
+`llama-qwen38.service` que opera actualmente.
