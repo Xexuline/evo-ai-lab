@@ -10,11 +10,13 @@ STATE_DIR="$TEMP_DIR/state"
 FAKE_BIN="$TEMP_DIR/bin"
 mkdir -p "$PROFILE_DIR"
 MODEL_FILE="$TEMP_DIR/model.gguf"
+DRAFT_FILE="$TEMP_DIR/draft.gguf"
 touch "$MODEL_FILE"
+touch "$DRAFT_FILE"
 
 write_profile() {
   local name=$1
-  sed "s|@MODEL@|$MODEL_FILE|" > "$PROFILE_DIR/$name.conf"
+  sed -e "s|@MODEL@|$MODEL_FILE|g" -e "s|@DRAFT@|$DRAFT_FILE|g" > "$PROFILE_DIR/$name.conf"
 }
 
 write_profile good <<'EOF'
@@ -35,6 +37,71 @@ EOF
 run_manager() { EVO_MODEL_PROFILE_DIR="$PROFILE_DIR" EVO_MODEL_STATE_DIR="$STATE_DIR" "$ROOT_DIR/scripts/evo-model" "$@"; }
 
 run_manager --validate-profile good >/dev/null
+
+# The deployed qwen38 profile has no external draft; both repository profiles
+# validate against the real GGUF files without contacting systemd.
+EVO_MODEL_PROFILE_DIR="$ROOT_DIR/config/models" EVO_MODEL_STATE_DIR="$STATE_DIR" "$ROOT_DIR/scripts/evo-model" --validate-profile qwen38-q4 >/dev/null
+EVO_MODEL_PROFILE_DIR="$ROOT_DIR/config/models" EVO_MODEL_STATE_DIR="$STATE_DIR" "$ROOT_DIR/scripts/evo-model" --validate-profile qwen36-mtp >/dev/null
+
+write_profile external-draft <<'EOF'
+PROFILE_NAME=external-draft
+MODEL_PATH=@MODEL@
+BACKEND=RADV/Vulkan
+CONTAINER=llama-vulkan-radv
+CONTEXT_SIZE=65536
+GPU_LAYERS=999
+PARALLEL_SLOTS=1
+SPEC_TYPE=draft-mtp
+DRAFT_MODEL_PATH=@DRAFT@
+DRAFT_GPU_LAYERS=999
+SPEC_DRAFT_N_MAX=2
+SPEC_DRAFT_P_MIN=0.8
+HOST=127.0.0.1
+PORT=8080
+EOF
+run_manager --validate-profile external-draft >/dev/null
+
+write_profile missing-draft <<'EOF'
+PROFILE_NAME=missing-draft
+MODEL_PATH=@MODEL@
+BACKEND=RADV/Vulkan
+CONTAINER=llama-vulkan-radv
+CONTEXT_SIZE=1
+GPU_LAYERS=0
+PARALLEL_SLOTS=1
+SPEC_TYPE=draft-mtp
+DRAFT_MODEL_PATH=/does/not/exist.gguf
+DRAFT_GPU_LAYERS=0
+SPEC_DRAFT_N_MAX=0
+SPEC_DRAFT_P_MIN=0
+HOST=127.0.0.1
+PORT=1
+EOF
+if run_manager --validate-profile missing-draft >/dev/null 2>&1; then
+  echo "expected missing draft model to fail" >&2
+  exit 1
+fi
+
+write_profile relative-draft <<'EOF'
+PROFILE_NAME=relative-draft
+MODEL_PATH=@MODEL@
+BACKEND=RADV/Vulkan
+CONTAINER=llama-vulkan-radv
+CONTEXT_SIZE=1
+GPU_LAYERS=0
+PARALLEL_SLOTS=1
+SPEC_TYPE=draft-mtp
+DRAFT_MODEL_PATH=draft.gguf
+DRAFT_GPU_LAYERS=0
+SPEC_DRAFT_N_MAX=0
+SPEC_DRAFT_P_MIN=0
+HOST=127.0.0.1
+PORT=1
+EOF
+if run_manager --validate-profile relative-draft >/dev/null 2>&1; then
+  echo "expected relative draft model path to fail" >&2
+  exit 1
+fi
 
 write_profile bad-key <<'EOF'
 PROFILE_NAME=bad-key
@@ -76,6 +143,7 @@ chmod +x "$FAKE_BIN/systemctl"
 # config/models. systemctl is simulated because `list` only reads its state.
 repo_profiles=$(HOME="$TEMP_DIR/repo-home" XDG_DATA_HOME="$TEMP_DIR/no-installed-data" PATH="$FAKE_BIN:$PATH" "$ROOT_DIR/scripts/evo-model" list)
 grep -Fxq 'qwen38-q4' <<<"$repo_profiles"
+grep -Fxq 'qwen36-mtp' <<<"$repo_profiles"
 
 # Simulate a Snap-like XDG_DATA_HOME. The stable per-user installation must win
 # over both it and the repository-relative fallback.
@@ -112,9 +180,51 @@ ID | NAME | STATUS | IMAGE
 abc123 | llama-vulkan-radv | Up | example/radv
 def456 | llama-vulkan | Up | example/vulkan
 TABLE
+elif [[ "$1" == "enter" ]]; then
+  printf '%s\n' "$@" > "$EVO_MODEL_TEST_ARGS"
 fi
 EOF
 chmod +x "$FAKE_BIN/distrobox"
+
+mkdir -p "$STATE_DIR"
+printf 'good\n' > "$STATE_DIR/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/no-draft-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected
+if grep -Fxq -- '--spec-draft-model' "$TEMP_DIR/no-draft-args" || grep -Fxq -- '--spec-draft-ngl' "$TEMP_DIR/no-draft-args"; then
+  echo "profile without draft unexpectedly passed draft arguments" >&2
+  exit 1
+fi
+
+printf 'external-draft\n' > "$STATE_DIR/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/draft-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected
+cat > "$TEMP_DIR/expected-draft-args" <<EOF
+enter
+llama-vulkan-radv
+--
+llama-server
+-m
+$MODEL_FILE
+-ngl
+999
+-c
+65536
+-np
+1
+--spec-type
+draft-mtp
+--spec-draft-model
+$DRAFT_FILE
+--spec-draft-ngl
+999
+--spec-draft-n-max
+2
+--spec-draft-p-min
+0.8
+--host
+127.0.0.1
+--port
+8080
+EOF
+diff -u "$TEMP_DIR/expected-draft-args" "$TEMP_DIR/draft-args"
 
 cat > "$FAKE_BIN/ss" <<'EOF'
 #!/usr/bin/env bash
@@ -191,6 +301,59 @@ chmod +x "$FAKE_BIN/curl"
 status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
 [[ "$status_output" == *"API: not ready"* ]]
 
+# Transient curl failures stay silent while each poll reports elapsed time. The
+# counter makes the successful response arrive only after multiple failures.
+cat > "$FAKE_BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+counter_file="${EVO_MODEL_TEST_CURL_COUNTER:?}"
+count=0
+[[ -f "$counter_file" ]] && count=$(<"$counter_file")
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+if [[ "$count" -lt 3 ]]; then
+  printf 'curl: transient test failure\n' >&2
+  exit 7
+fi
+printf '{"data":[{"id":"model.gguf"}]}'
+EOF
+chmod +x "$FAKE_BIN/curl"
+EVO_MODEL_TEST_CURL_COUNTER="$TEMP_DIR/curl-counter" PATH="$FAKE_BIN:$PATH" run_manager start good >"$TEMP_DIR/loading-output" 2>&1
+if grep -q 'curl: transient test failure' "$TEMP_DIR/loading-output"; then
+  echo "transient curl error was shown to the user" >&2
+  exit 1
+fi
+mapfile -t waiting_times < <(sed -n 's/^Waiting for API\.\.\. \([0-9][0-9]*\)s$/\1/p' "$TEMP_DIR/loading-output")
+[[ ${#waiting_times[@]} -ge 2 ]]
+[[ "${waiting_times[1]}" -gt "${waiting_times[0]}" ]]
+grep -Eq '^Model loaded in [0-9]+s$' "$TEMP_DIR/loading-output"
+
+# restart reuses the same waiting path and reports the load completion too.
+cat > "$FAKE_BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+printf '{"data":[{"id":"model.gguf"}]}'
+EOF
+chmod +x "$FAKE_BIN/curl"
+PATH="$FAKE_BIN:$PATH" run_manager restart >"$TEMP_DIR/restart-output" 2>&1
+grep -Eq '^Model loaded in [0-9]+s$' "$TEMP_DIR/restart-output"
+
+# A continuously unavailable API reaches the timeout without exposing curl
+# diagnostics or waiting for the production timeout.
+cat > "$FAKE_BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+printf 'curl: timeout test failure\n' >&2
+exit 7
+EOF
+chmod +x "$FAKE_BIN/curl"
+if PATH="$FAKE_BIN:$PATH" EVO_MODEL_HEALTH_TIMEOUT=1 run_manager start good >"$TEMP_DIR/timeout-output" 2>&1; then
+  echo "expected health check timeout to fail" >&2
+  exit 1
+fi
+grep -q 'Model did not become ready after ' "$TEMP_DIR/timeout-output"
+if grep -q 'curl: timeout test failure' "$TEMP_DIR/timeout-output"; then
+  echo "timeout exposed transient curl diagnostics" >&2
+  exit 1
+fi
+
 cat > "$FAKE_BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 printf '{"data":[{"id":"model.gguf"}]}'
@@ -203,7 +366,7 @@ if [[ "$*" == *"is-active"* ]]; then
   [[ -f "$counter_file" ]] && count=$(<"$counter_file")
   count=$((count + 1))
   printf '%s\n' "$count" > "$counter_file"
-  # start: inactive; wait loop: active; health before curl: active;
+  # start: active; wait loop: active; health before curl: active;
   # health after curl: inactive.
   [[ "$count" -lt 4 ]]
   exit

@@ -33,6 +33,13 @@ proceso iniciado esté listo. El runtime efectivo lo determina `CONTAINER`:
 `BACKEND=RADV/Vulkan` sin cambiar `CONTAINER=llama-vulkan-radv` no modifica el
 backend que se ejecuta.
 
+Los perfiles soportan tanto MTP integrado como un draft model externo. Un
+perfil sin `DRAFT_MODEL_PATH` conserva el comportamiento de MTP integrado; si
+declara `DRAFT_MODEL_PATH` y `DRAFT_GPU_LAYERS`, el runtime valida ambos y
+añade `--spec-draft-model` y `--spec-draft-ngl` a `llama-server`. El perfil
+`qwen36-mtp` para Qwen3.6 Q8_0 + MTP externo está implementado en el
+repositorio y **pendiente de despliegue**.
+
 ## Uso
 
 ```bash
@@ -73,6 +80,9 @@ para pruebas con `EVO_MODEL_HEALTH_TIMEOUT`) a que `http://127.0.0.1:<puerto>/v1
 responda correctamente, incluya la ruta completa del modelo o su nombre de
 archivo, y `evo-model.service` continúe activo después de la respuesta. Si
 systemd falla o vence el tiempo, devuelve error y recomienda `evo-model logs`.
+Durante la espera muestra un contador por cada polling y, al quedar lista la
+API, el tiempo operativo total desde que solicitó el arranque. No es un
+benchmark de inferencia.
 Sin autenticación entre procesos, dos servidores diferentes que sirvan
 exactamente el mismo `MODEL_PATH` en el mismo puerto no pueden distinguirse
 solo mediante `/v1/models`; la migración requiere detener primero
