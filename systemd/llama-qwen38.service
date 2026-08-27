@@ -1,0 +1,13 @@
+[Unit]
+Description=Qwen3.8 27B Q4 Local Inference Server
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/home/evo/.local/bin/llama-qwen38.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
