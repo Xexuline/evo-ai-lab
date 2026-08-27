@@ -101,6 +101,26 @@ El uso de `0.0.0.0:8080` en el perfil inicial es exclusivamente para la LAN de
 confianza. La API no está autenticada: no exponerla a Internet ni usar port
 forwarding.
 
+## Instalación y actualización
+
+La vía recomendada, tanto para la primera instalación como para actualizar una
+existente, es ejecutar desde la raíz del repositorio:
+
+```bash
+./install.sh
+```
+
+No requiere `sudo`, no descarga ni copia GGUF y no inicia, detiene, reinicia,
+habilita o deshabilita servicios. Instala o actualiza la CLI, la unidad, el
+completion Bash y todos los perfiles `config/models/*.conf`; no borra perfiles
+locales adicionales. Tras copiar la unidad ejecuta únicamente
+`systemctl --user daemon-reload`. Una shell Bash que ya estuviera abierta puede
+recargar el completion con:
+
+```bash
+source ~/.local/share/bash-completion/completions/evo-model
+```
+
 ## Despliegue y migración realizados
 
 La instalación activa usa:

@@ -29,3 +29,6 @@ seleccionar, cargar, detener y revisar un único modelo. El perfil inicial es
 `qwen38-q4`, ejecutado con `llama-vulkan-radv` (RADV/Vulkan). Las capacidades
 de múltiples modelos, control remoto, N150, LiteLLM, evo-top y descargas siguen
 fuera de v1.
+
+La instalación o actualización user-local recomendada se realiza desde la raíz
+del repositorio con `./install.sh`; no requiere `sudo` ni descarga pesos GGUF.
