@@ -13,7 +13,12 @@ El N150 existe y cumple el papel de control plane, pero no fue inspeccionado ni 
 
 ## Decisión
 
-El EVO concentra RAM, ancho de banda y la iGPU que necesita la inferencia. Mantener los servicios auxiliares en el N150 reduce la competencia por esos recursos y simplifica el diagnóstico del nodo de cómputo. El N150 puede consumir la API OpenAI-compatible del EVO por LAN; el control remoto completo de cambios de modelo es una integración futura.
+El EVO concentra RAM, ancho de banda y la iGPU que necesita la inferencia.
+`evo-model` v1, desplegado localmente, controla el ciclo de vida de un único
+perfil mediante systemd y Distrobox. Mantener los servicios auxiliares en el
+N150 reduce la competencia por esos recursos y simplifica el diagnóstico del
+nodo de cómputo. El N150 puede consumir la API OpenAI-compatible del EVO por
+LAN; el control remoto completo de cambios de modelo es una integración futura.
 
 ## Comprobación
 

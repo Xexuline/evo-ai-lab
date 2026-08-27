@@ -1,8 +1,9 @@
-# `evo-model` v1 — implementado en repositorio, pendiente de despliegue
+# `evo-model` v1 — implementado y desplegado
 
 `evo-model` es un gestor local de **un único perfil activo** de `llama.cpp`.
-No desplaza ni controla el actual `llama-qwen38.service`; la migración será una
-operación manual y controlada posterior.
+Está desplegado en el EVO-X3 con el perfil inicial `qwen38-q4`. La migración
+desde `llama-qwen38.service` se validó correctamente; la unidad anterior puede
+conservarse temporalmente como mecanismo de rollback.
 
 ## Arquitectura
 
@@ -74,9 +75,9 @@ El uso de `0.0.0.0:8080` en el perfil inicial es exclusivamente para la LAN de
 confianza. La API no está autenticada: no exponerla a Internet ni usar port
 forwarding.
 
-## Futuro despliegue y migración
+## Despliegue y migración realizados
 
-No se ha instalado ni iniciado nada en esta fase. La disposición prevista es:
+La instalación activa usa:
 
 ```text
 ~/.local/bin/evo-model
@@ -95,11 +96,31 @@ se conserva la ruta instalada esperada para que `evo-model --help` siga
 funcionando; los comandos que necesitan un perfil indicarán que no se
 encuentra. El estado usa
 `$XDG_STATE_HOME/evo-model` o `~/.local/state/evo-model` como fallback.
-Antes de migrar hay que revisar el puerto 8080 y parar manualmente el servicio
-antiguo en una ventana de mantenimiento. Rollback:
-detener solo `evo-model.service` y volver a iniciar la unidad anterior; no se
-borra ningún modelo ni su selección. No habilitar la nueva unidad hasta haber
-comprobado ese cambio.
+
+La migración validada instaló esos tres componentes, recargó el user manager,
+validó perfil y runtime, comprobó el puerto 8080 y detuvo el servicio anterior
+antes de ejecutar `evo-model start qwen38-q4`. El health check confirmó de nuevo
+la API. La protección de puerto también se verificó: mientras
+`llama-qwen38.service` ocupaba 8080, `evo-model` se negó a arrancar.
+
+Rollback conceptual durante la estabilización:
+
+```bash
+evo-model stop
+systemctl --user start llama-qwen38.service
+```
+
+No elimina perfiles ni modelos. Ejecutar el rollback es una operación
+administrativa deliberada; no se hace automáticamente.
+
+## Entorno administrativo
+
+Usar una terminal normal del sistema, SSH o systemd para administrar
+`evo-model` y diagnosticar Distrobox. En el terminal integrado de VS Code
+instalado mediante Snap se observó un entorno diferente: puede alterar variables
+como `XDG_DATA_HOME` y la detección de Distrobox. No se trata como un bug
+confirmado de VS Code o Distrobox, sino como una diferencia observada en ese
+entorno; consultar [troubleshooting](../../docs/troubleshooting.md).
 
 ## Límites de v1 y siguiente fase
 

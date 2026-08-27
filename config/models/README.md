@@ -31,6 +31,7 @@ Por ejemplo, `BACKEND=RADV/Vulkan` junto con
 `CONTAINER=llama-vulkan-radv` documenta la elección. Cambiar solamente
 `BACKEND` no cambia qué toolbox ni backend se ejecuta.
 
-`qwen38-q4.conf` replica el servidor Qwen3.8 actual, pero no sustituye el
-servicio operativo existente: esta versión está implementada en el repositorio
-y pendiente de despliegue.
+`qwen38-q4.conf` es el perfil inicial desplegado de EVO-X3: reproduce Qwen3.8
+Q4_K_L con RADV/Vulkan, MTP, contexto 65 536 y escucha en `0.0.0.0:8080`.
+El servicio anterior `llama-qwen38.service` se conserva documentado como
+referencia y posible rollback durante la estabilización.
