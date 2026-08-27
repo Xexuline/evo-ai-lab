@@ -45,6 +45,22 @@ evo-model logs
 evo-model logs -f
 ```
 
+## Autocompletado Bash
+
+El completion incluido propone los comandos de `evo-model`, consulta los
+perfiles dinámicamente con `evo-model list` al completar `evo-model start` y
+ofrece `-f` y `--follow` para `logs`. No inicia, detiene ni modifica servicios.
+
+Para instalarlo para el usuario:
+
+```bash
+install -Dm644 completions/evo-model.bash \
+  ~/.local/share/bash-completion/completions/evo-model
+```
+
+Abrir una nueva shell Bash o cargar el archivo con `source` para activarlo en
+la sesión actual. Si `evo-model list` falla, el completion no sugiere perfiles.
+
 `start` y `restart` validan el perfil, la ruta del GGUF y la existencia de la toolbox antes
 de persistir la selección. Si el servicio *gestionado por evo-model* ya está
 activo, lo detiene, comprueba con `ss` que el puerto del nuevo perfil haya
