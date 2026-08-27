@@ -8,7 +8,7 @@ Documentación y configuración reproducible del laboratorio local de IA. El nod
 - Sistema observado: Ubuntu 24.04.4 LTS, kernel `7.0.0-30-generic`.
 - Memoria Linux visible: ~124 GiB, con 1 GiB de VRAM fija y GTT dinámico de ~124 GiB.
 - Runtime recomendado provisionalmente: `llama-vulkan-radv` en Distrobox.
-- Modelo y perfil de servicio actuales: Qwen3.8-27B Q4_K_L con MTP, contexto 65 536 y `llama-server` en el puerto 8080.
+- Modelo y perfil gestionado actuales: Qwen3.8-27B Q4_K_L con MTP, contexto 65 536 y `llama-server` en el puerto 8080.
 
 El servicio expone una API compatible con OpenAI en `http://<EVO_IP>:8080/v1` dentro de la LAN. No debe exponerse directamente a Internet.
 
@@ -20,8 +20,12 @@ El servicio expone una API compatible con OpenAI en `http://<EVO_IP>:8080/v1` de
 - [Nodo de inferencia](docs/inference.md) y [red](docs/networking.md)
 - [Benchmarks](docs/benchmarks.md), [diagnóstico](docs/troubleshooting.md) y [roadmap](docs/roadmap.md)
 
-Las copias reproducibles del perfil activo están en [scripts/llama-qwen38.sh](scripts/llama-qwen38.sh) y [systemd/llama-qwen38.service](systemd/llama-qwen38.service). No incluyen el modelo; este repositorio nunca versiona modelos ni credenciales.
+El perfil gestionado desplegado es [`qwen38-q4`](config/models/qwen38-q4.conf), operado por [`evo-model`](tools/model-manager/README.md) y su unidad genérica. `llama-qwen38.service` y su script siguen versionados como referencia del servicio anterior y posible rollback durante la estabilización. El repositorio nunca versiona modelos ni credenciales.
 
-## Próximo paso corto
+## Model manager v1 (implementado y desplegado)
 
-Definir perfiles declarativos y construir `evo-model` para cargar, detener y consultar modelos sin convertir el EVO en el servidor de todos los servicios auxiliares.
+[`evo-model`](tools/model-manager/README.md) está desplegado en el EVO-X3 para
+seleccionar, cargar, detener y revisar un único modelo. El perfil inicial es
+`qwen38-q4`, ejecutado con `llama-vulkan-radv` (RADV/Vulkan). Las capacidades
+de múltiples modelos, control remoto, N150, LiteLLM, evo-top y descargas siguen
+fuera de v1.

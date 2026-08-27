@@ -1,18 +1,18 @@
 # Roadmap
 
-## Model manager: próximo objetivo
+## Model manager v1: desplegado
 
-Construir un gestor mínimo con una interfaz como:
+`evo-model` v1 está desplegado para operar un único perfil local mediante
+perfiles declarativos, `evo-model.service` y Distrobox. El perfil inicial
+`qwen38-q4` valida ruta de modelo, runtime, puerto y health check antes de
+declararse listo.
 
-```text
-evo-model qwen38
-evo-model qwen36
-evo-model gpt-oss
-evo-model stop
-evo-model status
-```
+## Model manager: siguiente fase
 
-Gestionará perfiles declarativos y el ciclo de vida de `llama-server`: seleccionar modelo, cargarlo, descargarlo y comunicar estado. Antes de implementarlo hay que decidir dónde viven los perfiles, cómo se valida que un modelo existe sin registrar su contenido, y cómo serializar cambios para que no haya dos cargas compitiendo por la iGPU.
+No están implementados múltiples modelos simultáneos, API remota de
+administración, integración con N150, LiteLLM, carga automática solicitada por
+clientes, evo-top ni descargas automáticas. Una fase posterior deberá decidir
+cómo serializar cambios remotos y evitar cargas que compitan por la iGPU.
 
 ## Múltiples modelos residentes: experimento futuro
 
