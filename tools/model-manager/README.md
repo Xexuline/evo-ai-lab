@@ -80,16 +80,23 @@ No se ha instalado ni iniciado nada en esta fase. La disposición prevista es:
 
 ```text
 ~/.local/bin/evo-model
-~/.local/share/evo-model/config/models/*.conf
+~/.local/share/evo-model/models/*.conf
 ~/.config/systemd/user/evo-model.service
 ~/.local/state/evo-model/selected-profile
 ```
 
-El gestor instalado detecta preferentemente
-`$XDG_DATA_HOME/evo-model/config/models` (por defecto
-`~/.local/share/evo-model/config/models`); al ejecutarse desde el repositorio
-usa `config/models`. Antes de migrar hay que revisar el puerto 8080 y parar
-manualmente el servicio antiguo en una ventana de mantenimiento. Rollback:
+La resolución de perfiles, en orden, es: `EVO_MODEL_PROFILE_DIR` si está
+definida; `$HOME/.local/share/evo-model/models` si existe; y `config/models`
+relativo al repositorio durante desarrollo. La ubicación instalada ignora
+deliberadamente `XDG_DATA_HOME`: `evo-model` es una herramienta administrativa
+del usuario y debe ver los mismos perfiles desde terminal, SSH, systemd de
+usuario y terminales sandboxed como VS Code/Snap. Si ninguna carpeta existe,
+se conserva la ruta instalada esperada para que `evo-model --help` siga
+funcionando; los comandos que necesitan un perfil indicarán que no se
+encuentra. El estado usa
+`$XDG_STATE_HOME/evo-model` o `~/.local/state/evo-model` como fallback.
+Antes de migrar hay que revisar el puerto 8080 y parar manualmente el servicio
+antiguo en una ventana de mantenimiento. Rollback:
 detener solo `evo-model.service` y volver a iniciar la unidad anterior; no se
 borra ningún modelo ni su selección. No habilitar la nueva unidad hasta haber
 comprobado ese cambio.

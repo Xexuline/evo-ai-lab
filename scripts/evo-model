@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
 # Local, single-profile model manager for llama.cpp.  Intended to be installed
-# as ~/.local/bin/evo-model with the repository's config/ copied to
-# ~/.local/share/evo-model/config/.
+# as ~/.local/bin/evo-model with profiles in
+# ~/.local/share/evo-model/models/.
 
 set -euo pipefail
 
 readonly PROGRAM="evo-model"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${XDG_DATA_HOME:-$HOME/.local/share}/evo-model/config/models" ]]; then
-  DEFAULT_PROFILE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/evo-model/config/models"
+readonly INSTALLED_PROFILE_DIR="$HOME/.local/share/evo-model/models"
+readonly REPOSITORY_PROFILE_DIR="$SCRIPT_DIR/../config/models"
+if [[ -n ${EVO_MODEL_PROFILE_DIR+x} ]]; then
+  PROFILE_DIR="$EVO_MODEL_PROFILE_DIR"
+elif [[ -d "$INSTALLED_PROFILE_DIR" ]]; then
+  PROFILE_DIR="$INSTALLED_PROFILE_DIR"
+elif [[ -d "$REPOSITORY_PROFILE_DIR" ]]; then
+  PROFILE_DIR="$REPOSITORY_PROFILE_DIR"
 else
-  DEFAULT_PROFILE_DIR="$(cd -- "$SCRIPT_DIR/../config/models" && pwd)"
+  # An installed script can still show help before profiles are installed.
+  PROFILE_DIR="$INSTALLED_PROFILE_DIR"
 fi
-readonly DEFAULT_PROFILE_DIR
-readonly PROFILE_DIR="${EVO_MODEL_PROFILE_DIR:-$DEFAULT_PROFILE_DIR}"
+readonly PROFILE_DIR
 readonly STATE_DIR="${EVO_MODEL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/evo-model}"
 readonly SELECTION_FILE="$STATE_DIR/selected-profile"
 readonly SERVICE_NAME="${EVO_MODEL_SERVICE_NAME:-evo-model.service}"

@@ -66,6 +66,44 @@ if run_manager --validate-profile missing-model >/dev/null 2>&1; then
 fi
 
 mkdir -p "$FAKE_BIN"
+cat > "$FAKE_BIN/systemctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$FAKE_BIN/systemctl"
+
+# With no stable user installation, direct repository execution selects
+# config/models. systemctl is simulated because `list` only reads its state.
+repo_profiles=$(HOME="$TEMP_DIR/repo-home" XDG_DATA_HOME="$TEMP_DIR/no-installed-data" PATH="$FAKE_BIN:$PATH" "$ROOT_DIR/scripts/evo-model" list)
+grep -Fxq 'qwen38-q4' <<<"$repo_profiles"
+
+# Simulate a Snap-like XDG_DATA_HOME. The stable per-user installation must win
+# over both it and the repository-relative fallback.
+INSTALLED_BIN="$TEMP_DIR/installed/bin"
+INSTALLED_HOME="$TEMP_DIR/installed-home"
+INSTALLED_MODELS="$INSTALLED_HOME/.local/share/evo-model/models"
+SNAP_DATA="$TEMP_DIR/fake-snap/.local/share"
+mkdir -p "$INSTALLED_BIN" "$INSTALLED_MODELS"
+cp "$ROOT_DIR/scripts/evo-model" "$INSTALLED_BIN/evo-model"
+chmod +x "$INSTALLED_BIN/evo-model"
+sed 's/^PROFILE_NAME=good$/PROFILE_NAME=qwen38-q4/' "$PROFILE_DIR/good.conf" > "$INSTALLED_MODELS/qwen38-q4.conf"
+installed_profiles=$(HOME="$INSTALLED_HOME" XDG_DATA_HOME="$SNAP_DATA" PATH="$FAKE_BIN:$PATH" "$INSTALLED_BIN/evo-model" list)
+grep -Fxq 'qwen38-q4' <<<"$installed_profiles"
+HOME="$INSTALLED_HOME" XDG_DATA_HOME="$SNAP_DATA" "$INSTALLED_BIN/evo-model" --validate-profile qwen38-q4 >/dev/null
+
+# The explicit override has priority over the stable installed layout.
+OVERRIDE_MODELS="$TEMP_DIR/override-models"
+mkdir -p "$OVERRIDE_MODELS"
+sed 's/^PROFILE_NAME=good$/PROFILE_NAME=override/' "$PROFILE_DIR/good.conf" > "$OVERRIDE_MODELS/override.conf"
+EVO_MODEL_PROFILE_DIR="$OVERRIDE_MODELS" HOME="$INSTALLED_HOME" XDG_DATA_HOME="$SNAP_DATA" "$INSTALLED_BIN/evo-model" --validate-profile override >/dev/null
+
+# Even an installed script with neither profile directory can show help.
+EMPTY_BIN="$TEMP_DIR/empty/bin"
+mkdir -p "$EMPTY_BIN"
+cp "$ROOT_DIR/scripts/evo-model" "$EMPTY_BIN/evo-model"
+chmod +x "$EMPTY_BIN/evo-model"
+HOME="$TEMP_DIR/empty-home" XDG_DATA_HOME="$TEMP_DIR/empty-data" "$EMPTY_BIN/evo-model" --help >/dev/null
+
 cat > "$FAKE_BIN/distrobox" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "list" ]]; then
