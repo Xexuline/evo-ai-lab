@@ -11,12 +11,14 @@ FAKE_BIN="$TEMP_DIR/bin"
 mkdir -p "$PROFILE_DIR"
 MODEL_FILE="$TEMP_DIR/model.gguf"
 DRAFT_FILE="$TEMP_DIR/draft.gguf"
+MMPROJ_FILE="$TEMP_DIR/mmproj.gguf"
 touch "$MODEL_FILE"
 touch "$DRAFT_FILE"
+touch "$MMPROJ_FILE"
 
 write_profile() {
   local name=$1
-  sed -e "s|@MODEL@|$MODEL_FILE|g" -e "s|@DRAFT@|$DRAFT_FILE|g" > "$PROFILE_DIR/$name.conf"
+  sed -e "s|@MODEL@|$MODEL_FILE|g" -e "s|@DRAFT@|$DRAFT_FILE|g" -e "s|@MMPROJ@|$MMPROJ_FILE|g" > "$PROFILE_DIR/$name.conf"
 }
 
 write_profile good <<'EOF'
@@ -40,8 +42,11 @@ run_manager --validate-profile good >/dev/null
 
 # The deployed qwen38 profile has no external draft; both repository profiles
 # validate against the real GGUF files without contacting systemd.
-EVO_MODEL_PROFILE_DIR="$ROOT_DIR/config/models" EVO_MODEL_STATE_DIR="$STATE_DIR" "$ROOT_DIR/scripts/evo-model" --validate-profile qwen38-q4 >/dev/null
-EVO_MODEL_PROFILE_DIR="$ROOT_DIR/config/models" EVO_MODEL_STATE_DIR="$STATE_DIR" "$ROOT_DIR/scripts/evo-model" --validate-profile qwen36-mtp >/dev/null
+for repository_profile in "$ROOT_DIR"/config/models/*.conf; do
+  profile_name=${repository_profile##*/}
+  profile_name=${profile_name%.conf}
+  EVO_MODEL_PROFILE_DIR="$ROOT_DIR/config/models" EVO_MODEL_STATE_DIR="$STATE_DIR" "$ROOT_DIR/scripts/evo-model" --validate-profile "$profile_name" >/dev/null
+done
 
 write_profile external-draft <<'EOF'
 PROFILE_NAME=external-draft
@@ -54,12 +59,48 @@ PARALLEL_SLOTS=1
 SPEC_TYPE=draft-mtp
 DRAFT_MODEL_PATH=@DRAFT@
 DRAFT_GPU_LAYERS=999
+MMPROJ_PATH=@MMPROJ@
 SPEC_DRAFT_N_MAX=2
 SPEC_DRAFT_P_MIN=0.8
 HOST=127.0.0.1
 PORT=8080
 EOF
 run_manager --validate-profile external-draft >/dev/null
+
+write_profile no-spec <<'EOF'
+PROFILE_NAME=no-spec
+MODEL_PATH=@MODEL@
+MMPROJ_PATH=@MMPROJ@
+BACKEND=RADV/Vulkan
+CONTAINER=llama-vulkan-radv
+CONTEXT_SIZE=1
+GPU_LAYERS=0
+PARALLEL_SLOTS=1
+SPEC_DRAFT_N_MAX=0
+SPEC_DRAFT_P_MIN=0
+HOST=127.0.0.1
+PORT=1
+EOF
+run_manager --validate-profile no-spec >/dev/null
+
+write_profile missing-mmproj <<'EOF'
+PROFILE_NAME=missing-mmproj
+MODEL_PATH=@MODEL@
+MMPROJ_PATH=/does/not/exist.gguf
+BACKEND=RADV/Vulkan
+CONTAINER=llama-vulkan-radv
+CONTEXT_SIZE=1
+GPU_LAYERS=0
+PARALLEL_SLOTS=1
+SPEC_DRAFT_N_MAX=0
+SPEC_DRAFT_P_MIN=0
+HOST=127.0.0.1
+PORT=1
+EOF
+if run_manager --validate-profile missing-mmproj >/dev/null 2>&1; then
+  echo "expected missing multimodal projector to fail" >&2
+  exit 1
+fi
 
 write_profile missing-draft <<'EOF'
 PROFILE_NAME=missing-draft
@@ -194,6 +235,14 @@ if grep -Fxq -- '--spec-draft-model' "$TEMP_DIR/no-draft-args" || grep -Fxq -- '
   exit 1
 fi
 
+printf 'no-spec\n' > "$STATE_DIR/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/no-spec-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected
+grep -Fxq -- '--mmproj' "$TEMP_DIR/no-spec-args"
+if grep -Fq -- '--spec-' "$TEMP_DIR/no-spec-args"; then
+  echo "profile without SPEC_TYPE unexpectedly passed speculative arguments" >&2
+  exit 1
+fi
+
 printf 'external-draft\n' > "$STATE_DIR/selected-profile"
 EVO_MODEL_TEST_ARGS="$TEMP_DIR/draft-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected
 cat > "$TEMP_DIR/expected-draft-args" <<EOF
@@ -209,6 +258,8 @@ $MODEL_FILE
 65536
 -np
 1
+--mmproj
+$MMPROJ_FILE
 --spec-type
 draft-mtp
 --spec-draft-model
@@ -292,6 +343,12 @@ status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
 [[ "$status_output" == *"API: ready"* ]]
 [[ "$status_output" == *"Listen: 127.0.0.1:8080"* ]]
 [[ "$status_output" == *"Health endpoint: http://127.0.0.1:8080/v1/models"* ]]
+
+printf 'external-draft\n' > "$STATE_DIR/selected-profile"
+status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
+[[ "$status_output" == *"Draft model: draft.gguf"* ]]
+[[ "$status_output" == *"MMProj: mmproj.gguf"* ]]
+printf 'good\n' > "$STATE_DIR/selected-profile"
 
 cat > "$FAKE_BIN/curl" <<'EOF'
 #!/usr/bin/env bash

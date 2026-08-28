@@ -17,9 +17,23 @@ desplegado es [`qwen38-q4`](../config/models/qwen38-q4.conf), que entra en
 
 El archivo GGUF no está incluido ni debe añadirse al repositorio.
 
-`llama-qwen38.service` fue el servicio anterior usado para Qwen3.8. Sus copias
-versionadas se conservan como referencia y posible rollback durante la
-estabilización; esta documentación no afirma que haya sido eliminado.
+Además del perfil inicial, el catálogo de `evo-model` contiene perfiles para
+los GGUF disponibles en el nodo. El gestor sigue cargando solo **un** perfil a
+la vez. Los perfiles multimodales usan un `mmproj` cuando su asociación está
+confirmada; Qwen Coder Next se carga indicando el primer shard, con el resto
+del conjunto resuelto por llama.cpp. El detalle del catálogo y los modelos
+deliberadamente excluidos está en [config/models](../config/models/README.md).
+
+`llama-qwen38.service` fue el servicio específico usado anteriormente para
+cargar Qwen3.8 directamente. Sus copias versionadas se conservan como referencia
+y posible rollback durante la estabilización; esta documentación no afirma que
+haya sido eliminado. La unidad de usuario se encuentra deliberadamente
+deshabilitada para evitar que cargue automáticamente Qwen3.8 al arrancar.
+
+`evo-model.service` es ahora el servicio gestionado mediante `evo-model`. A
+diferencia del servicio anterior, puede estar habilitado al inicio. La carga y
+descarga de modelos debe gestionarse exclusivamente mediante `evo-model`; no se
+deben modificar las unidades systemd de forma manual.
 
 ## Operación con systemd de usuario
 

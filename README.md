@@ -30,5 +30,9 @@ seleccionar, cargar, detener y revisar un único modelo. El perfil inicial es
 de múltiples modelos, control remoto, N150, LiteLLM, evo-top y descargas siguen
 fuera de v1.
 
+El catálogo de perfiles del repositorio cubre los GGUF inspeccionados en el
+EVO-X3, incluidos modelos multimodales y Qwen Coder sharded; consultar
+[config/models](config/models/README.md) para asociaciones y limitaciones.
+
 La instalación o actualización user-local recomendada se realiza desde la raíz
 del repositorio con `./install.sh`; no requiere `sudo` ni descarga pesos GGUF.

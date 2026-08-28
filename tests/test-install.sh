@@ -42,11 +42,46 @@ for profile in "$ROOT_DIR"/config/models/*.conf; do
 done
 grep -Fxq -- '--user daemon-reload' "$SYSTEMCTL_LOG"
 
-# A second run updates known files but preserves profiles not owned by the repo.
-printf 'LOCAL_PROFILE=preserve\n' > "$PROFILE_DESTINATION_DIR/local-custom.conf"
+# A second run updates known files, removes obsolete .conf files, and preserves
+# non-profile files in the managed directory.
+printf 'LOCAL_PROFILE=obsolete\n' > "$PROFILE_DESTINATION_DIR/local-custom.conf"
+printf 'keep\n' > "$PROFILE_DESTINATION_DIR/notes.txt"
 printf 'outdated\n' > "$CLI_DESTINATION"
 run_installer > "$TEMP_DIR/second-install-output"
 cmp -s "$ROOT_DIR/scripts/evo-model" "$CLI_DESTINATION"
-[[ -f "$PROFILE_DESTINATION_DIR/local-custom.conf" ]]
+[[ ! -e "$PROFILE_DESTINATION_DIR/local-custom.conf" ]]
+[[ -f "$PROFILE_DESTINATION_DIR/notes.txt" ]]
+
+# A repository profile added later appears after installation, and disappears
+# again when it is removed from that repository's source of truth.
+SOURCE_COPY="$TEMP_DIR/source-copy"
+mkdir -p "$SOURCE_COPY"
+cp "$ROOT_DIR/install.sh" "$SOURCE_COPY/install.sh"
+cp -R "$ROOT_DIR/scripts" "$ROOT_DIR/config" "$ROOT_DIR/systemd" "$ROOT_DIR/completions" "$SOURCE_COPY/"
+chmod +x "$SOURCE_COPY/install.sh"
+cat > "$SOURCE_COPY/config/models/test-added.conf" <<'EOF'
+PROFILE_NAME=test-added
+EOF
+(
+  cd "$TEMP_DIR/other-directory"
+  HOME="$TEST_HOME" EVO_MODEL_TEST_SYSTEMCTL_LOG="$SYSTEMCTL_LOG" PATH="$FAKE_BIN:$PATH" \
+    "$SOURCE_COPY/install.sh"
+)
+[[ -f "$PROFILE_DESTINATION_DIR/test-added.conf" ]]
+rm -f -- "$SOURCE_COPY/config/models/test-added.conf"
+(
+  cd "$TEMP_DIR/other-directory"
+  HOME="$TEST_HOME" EVO_MODEL_TEST_SYSTEMCTL_LOG="$SYSTEMCTL_LOG" PATH="$FAKE_BIN:$PATH" \
+    "$SOURCE_COPY/install.sh"
+)
+[[ ! -e "$PROFILE_DESTINATION_DIR/test-added.conf" ]]
+
+if HOME="$TEST_HOME" EVO_MODEL_TEST_SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
+  EVO_MODEL_TEST_PROFILE_DESTINATION="$TEMP_DIR/wrong-profile-directory" PATH="$FAKE_BIN:$PATH" \
+  "$ROOT_DIR/install.sh" >/dev/null 2>&1; then
+  echo "expected non-standard profile destination to be rejected" >&2
+  exit 1
+fi
+[[ ! -e "$TEMP_DIR/wrong-profile-directory" ]]
 
 echo "evo-model installer tests passed"

@@ -8,7 +8,10 @@ readonly PROFILE_SOURCE_DIR="$REPO_DIR/config/models"
 readonly UNIT_SOURCE="$REPO_DIR/systemd/evo-model.service"
 readonly COMPLETION_SOURCE="$REPO_DIR/completions/evo-model.bash"
 readonly CLI_DESTINATION="$HOME/.local/bin/evo-model"
-readonly PROFILE_DESTINATION_DIR="$HOME/.local/share/evo-model/models"
+readonly EXPECTED_PROFILE_DESTINATION_DIR="$HOME/.local/share/evo-model/models"
+# Test-only override: any path other than the expected user-local directory is
+# rejected before installation or deletion.
+readonly PROFILE_DESTINATION_DIR="${EVO_MODEL_TEST_PROFILE_DESTINATION:-$EXPECTED_PROFILE_DESTINATION_DIR}"
 readonly UNIT_DESTINATION="$HOME/.config/systemd/user/evo-model.service"
 readonly COMPLETION_DESTINATION="$HOME/.local/share/bash-completion/completions/evo-model"
 
@@ -20,6 +23,8 @@ ok() { printf '[OK] %-16s %s\n' "$1" "$2"; }
 [[ -f "$UNIT_SOURCE" ]] || die "missing required file: $UNIT_SOURCE"
 [[ -f "$COMPLETION_SOURCE" ]] || die "missing required file: $COMPLETION_SOURCE"
 command -v systemctl >/dev/null 2>&1 || die "systemctl is required for daemon-reload"
+[[ "$PROFILE_DESTINATION_DIR" == "$EXPECTED_PROFILE_DESTINATION_DIR" ]] \
+  || die "refusing to manage profiles outside: $EXPECTED_PROFILE_DESTINATION_DIR"
 
 shopt -s nullglob
 profiles=("$PROFILE_SOURCE_DIR"/*.conf)
@@ -35,6 +40,12 @@ mkdir -p \
 install -m 755 "$CLI_SOURCE" "$CLI_DESTINATION"
 ok "CLI" "$CLI_DESTINATION"
 
+# This directory is managed by install.sh. Remove only profile files in this
+# exact directory; never remove the directory itself or other file types.
+installed_profiles=("$PROFILE_DESTINATION_DIR"/*.conf)
+for profile in "${installed_profiles[@]}"; do
+  rm -f -- "$profile"
+done
 for profile in "${profiles[@]}"; do
   install -m 644 "$profile" "$PROFILE_DESTINATION_DIR/${profile##*/}"
 done

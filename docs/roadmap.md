@@ -5,7 +5,8 @@
 `evo-model` v1 está desplegado para operar un único perfil local mediante
 perfiles declarativos, `evo-model.service` y Distrobox. El perfil inicial
 `qwen38-q4` valida ruta de modelo, runtime, puerto y health check antes de
-declararse listo.
+declararse listo. El catálogo del repositorio incluye los GGUF inspeccionados
+en EVO-X3, pero v1 mantiene un único modelo activo simultáneamente.
 
 ## Model manager: siguiente fase
 

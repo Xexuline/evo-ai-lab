@@ -47,14 +47,14 @@ EOF
 
 valid_key() {
   case "$1" in
-    PROFILE_NAME|MODEL_PATH|BACKEND|CONTAINER|CONTEXT_SIZE|GPU_LAYERS|PARALLEL_SLOTS|SPEC_TYPE|DRAFT_MODEL_PATH|DRAFT_GPU_LAYERS|SPEC_DRAFT_N_MAX|SPEC_DRAFT_P_MIN|HOST|PORT) return 0 ;;
+    PROFILE_NAME|MODEL_PATH|BACKEND|CONTAINER|CONTEXT_SIZE|GPU_LAYERS|PARALLEL_SLOTS|SPEC_TYPE|DRAFT_MODEL_PATH|DRAFT_GPU_LAYERS|MMPROJ_PATH|SPEC_DRAFT_N_MAX|SPEC_DRAFT_P_MIN|HOST|PORT) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 reset_profile() {
   PROFILE_NAME= MODEL_PATH= BACKEND= CONTAINER= CONTEXT_SIZE= GPU_LAYERS=
-  PARALLEL_SLOTS= SPEC_TYPE= DRAFT_MODEL_PATH= DRAFT_GPU_LAYERS=
+  PARALLEL_SLOTS= SPEC_TYPE= DRAFT_MODEL_PATH= DRAFT_GPU_LAYERS= MMPROJ_PATH=
   SPEC_DRAFT_N_MAX= SPEC_DRAFT_P_MIN= HOST= PORT=
 }
 
@@ -92,13 +92,18 @@ is_host() { [[ "$1" =~ ^[A-Za-z0-9.:_-]+$ ]]; }
 
 validate_loaded_profile() {
   local required
-  for required in PROFILE_NAME MODEL_PATH BACKEND CONTAINER CONTEXT_SIZE GPU_LAYERS PARALLEL_SLOTS SPEC_TYPE SPEC_DRAFT_N_MAX SPEC_DRAFT_P_MIN HOST PORT; do
+  for required in PROFILE_NAME MODEL_PATH BACKEND CONTAINER CONTEXT_SIZE GPU_LAYERS PARALLEL_SLOTS SPEC_DRAFT_N_MAX SPEC_DRAFT_P_MIN HOST PORT; do
     [[ -n ${!required} ]] || die "profile $PROFILE_NAME: missing required key $required"
   done
   [[ "$MODEL_PATH" = /* ]] || die "profile $PROFILE_NAME: MODEL_PATH must be absolute"
   [[ -f "$MODEL_PATH" ]] || die "profile $PROFILE_NAME: model not found: $MODEL_PATH"
+  if [[ -n "$MMPROJ_PATH" ]]; then
+    [[ "$MMPROJ_PATH" = /* ]] || die "profile $PROFILE_NAME: MMPROJ_PATH must be absolute"
+    [[ -f "$MMPROJ_PATH" ]] || die "profile $PROFILE_NAME: multimodal projector not found: $MMPROJ_PATH"
+  fi
   if [[ -n "$DRAFT_MODEL_PATH" || -n "$DRAFT_GPU_LAYERS" ]]; then
     [[ -n "$DRAFT_MODEL_PATH" && -n "$DRAFT_GPU_LAYERS" ]] || die "profile $PROFILE_NAME: DRAFT_MODEL_PATH and DRAFT_GPU_LAYERS must be defined together"
+    [[ -n "$SPEC_TYPE" ]] || die "profile $PROFILE_NAME: DRAFT_MODEL_PATH requires SPEC_TYPE"
     [[ "$DRAFT_MODEL_PATH" = /* ]] || die "profile $PROFILE_NAME: DRAFT_MODEL_PATH must be absolute"
     [[ -f "$DRAFT_MODEL_PATH" ]] || die "profile $PROFILE_NAME: draft model not found: $DRAFT_MODEL_PATH"
     is_uint "$DRAFT_GPU_LAYERS" || die "profile $PROFILE_NAME: DRAFT_GPU_LAYERS must be a non-negative integer"
@@ -107,7 +112,7 @@ validate_loaded_profile() {
   is_uint "$CONTEXT_SIZE" && [[ "$CONTEXT_SIZE" -gt 0 ]] || die "profile $PROFILE_NAME: CONTEXT_SIZE must be a positive integer"
   is_uint "$GPU_LAYERS" || die "profile $PROFILE_NAME: GPU_LAYERS must be a non-negative integer"
   is_uint "$PARALLEL_SLOTS" && [[ "$PARALLEL_SLOTS" -gt 0 ]] || die "profile $PROFILE_NAME: PARALLEL_SLOTS must be a positive integer"
-  [[ "$SPEC_TYPE" =~ ^[A-Za-z0-9_-]+$ ]] || die "profile $PROFILE_NAME: invalid SPEC_TYPE"
+  [[ -z "$SPEC_TYPE" || "$SPEC_TYPE" =~ ^[A-Za-z0-9_-]+$ ]] || die "profile $PROFILE_NAME: invalid SPEC_TYPE"
   is_uint "$SPEC_DRAFT_N_MAX" || die "profile $PROFILE_NAME: SPEC_DRAFT_N_MAX must be a non-negative integer"
   is_decimal_0_1 "$SPEC_DRAFT_P_MIN" || die "profile $PROFILE_NAME: SPEC_DRAFT_P_MIN must be between 0 and 1"
   is_host "$HOST" || die "profile $PROFILE_NAME: invalid HOST"
@@ -225,7 +230,7 @@ cmd_list() {
 }
 
 cmd_status() {
-  local selected service_state api_state="not ready" pid="-" draft_name
+  local selected service_state api_state="not ready" pid="-" draft_name mmproj_name
   selected=$(read_selection || true)
   if [[ -z "$selected" ]]; then
     service_state=$(systemctl --user is-active "$SERVICE_NAME" 2>/dev/null || true)
@@ -253,6 +258,10 @@ EOF
   if [[ -n "$DRAFT_MODEL_PATH" ]]; then
     draft_name=${DRAFT_MODEL_PATH##*/}
     printf 'Draft model: %s\n' "$draft_name"
+  fi
+  if [[ -n "$MMPROJ_PATH" ]]; then
+    mmproj_name=${MMPROJ_PATH##*/}
+    printf 'MMProj: %s\n' "$mmproj_name"
   fi
   cat <<EOF
 Context: $CONTEXT_SIZE
@@ -313,15 +322,16 @@ cmd_run_selected() {
   load_profile "$selected"; validate_loaded_profile; validate_runtime
   server_args=(
     -m "$MODEL_PATH" -ngl "$GPU_LAYERS" -c "$CONTEXT_SIZE" -np "$PARALLEL_SLOTS"
-    --spec-type "$SPEC_TYPE"
   )
-  if [[ -n "$DRAFT_MODEL_PATH" ]]; then
-    server_args+=(--spec-draft-model "$DRAFT_MODEL_PATH" --spec-draft-ngl "$DRAFT_GPU_LAYERS")
+  [[ -n "$MMPROJ_PATH" ]] && server_args+=(--mmproj "$MMPROJ_PATH")
+  if [[ -n "$SPEC_TYPE" ]]; then
+    server_args+=(--spec-type "$SPEC_TYPE")
+    if [[ -n "$DRAFT_MODEL_PATH" ]]; then
+      server_args+=(--spec-draft-model "$DRAFT_MODEL_PATH" --spec-draft-ngl "$DRAFT_GPU_LAYERS")
+    fi
+    server_args+=(--spec-draft-n-max "$SPEC_DRAFT_N_MAX" --spec-draft-p-min "$SPEC_DRAFT_P_MIN")
   fi
-  server_args+=(
-    --spec-draft-n-max "$SPEC_DRAFT_N_MAX" --spec-draft-p-min "$SPEC_DRAFT_P_MIN"
-    --host "$HOST" --port "$PORT"
-  )
+  server_args+=(--host "$HOST" --port "$PORT")
   exec distrobox enter "$CONTAINER" -- llama-server "${server_args[@]}"
 }
 
