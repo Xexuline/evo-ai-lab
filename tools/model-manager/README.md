@@ -33,6 +33,17 @@ proceso iniciado esté listo. El runtime efectivo lo determina `CONTAINER`:
 `BACKEND=RADV/Vulkan` sin cambiar `CONTAINER=llama-vulkan-radv` no modifica el
 backend que se ejecuta.
 
+Los perfiles soportan tanto MTP integrado como un draft model externo. Un
+perfil sin `DRAFT_MODEL_PATH` conserva el comportamiento de MTP integrado; si
+declara `DRAFT_MODEL_PATH` y `DRAFT_GPU_LAYERS`, el runtime valida ambos y
+añade `--spec-draft-model` y `--spec-draft-ngl` a `llama-server`. El perfil
+`qwen36-mtp` para Qwen3.6 Q8_0 + MTP externo está implementado y desplegado.
+
+Los perfiles multimodales pueden declarar `MMPROJ_PATH`; el gestor valida el
+GGUF del proyector y añade `--mmproj`. Los modelos sharded se representan por
+el primer shard: llama.cpp carga el resto del conjunto automáticamente. Véase
+el [catálogo de perfiles](../../config/models/README.md#catálogo-inspeccionado).
+
 ## Uso
 
 ```bash
@@ -73,6 +84,9 @@ para pruebas con `EVO_MODEL_HEALTH_TIMEOUT`) a que `http://127.0.0.1:<puerto>/v1
 responda correctamente, incluya la ruta completa del modelo o su nombre de
 archivo, y `evo-model.service` continúe activo después de la respuesta. Si
 systemd falla o vence el tiempo, devuelve error y recomienda `evo-model logs`.
+Durante la espera muestra un contador por cada polling y, al quedar lista la
+API, el tiempo operativo total desde que solicitó el arranque. No es un
+benchmark de inferencia.
 Sin autenticación entre procesos, dos servidores diferentes que sirvan
 exactamente el mismo `MODEL_PATH` en el mismo puerto no pueden distinguirse
 solo mediante `/v1/models`; la migración requiere detener primero
@@ -90,6 +104,30 @@ STATUS | IMAGE`, comparando el nombre completo, no prefijos parciales.
 El uso de `0.0.0.0:8080` en el perfil inicial es exclusivamente para la LAN de
 confianza. La API no está autenticada: no exponerla a Internet ni usar port
 forwarding.
+
+## Instalación y actualización
+
+La vía recomendada, tanto para la primera instalación como para actualizar una
+existente, es ejecutar desde la raíz del repositorio:
+
+```bash
+./install.sh
+```
+
+No requiere `sudo`, no descarga ni copia GGUF y no inicia, detiene, reinicia,
+habilita o deshabilita servicios. Instala o actualiza la CLI, la unidad, el
+completion Bash y todos los perfiles `config/models/*.conf`. El directorio
+`~/.local/share/evo-model/models` es gestionado por `install.sh`: antes de
+copiar elimina únicamente los archivos `*.conf` de ese directorio para que el
+repositorio sea la fuente de verdad. No colocar ahí perfiles locales manuales,
+porque desaparecerán en la siguiente instalación; los archivos que no son
+`.conf` no se eliminan. Tras copiar la unidad ejecuta únicamente
+`systemctl --user daemon-reload`. Una shell Bash que ya estuviera abierta puede
+recargar el completion con:
+
+```bash
+source ~/.local/share/bash-completion/completions/evo-model
+```
 
 ## Despliegue y migración realizados
 
