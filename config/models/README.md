@@ -62,6 +62,9 @@ rendimiento ni un benchmark.
 | `qwen38-abliterated-mtp-vl` | Qwen3.8 Aggressive Q8_K_P | 32768 | MTP integrado | Sí |
 | `gpt-oss-120b` | GPT-OSS 120B MXFP4 | 16384 | No | No |
 | `coder-next-q5` | Qwen Coder Next Q5_K_M | 32768 | No | No |
+| `worker-default` | Qwen3.6 35B-A3B Q8_0 | 65536 | Draft MTP externo | No |
+| `worker-dedicated` | Qwen3.6 35B-A3B Q8_0 | 131072 | Draft MTP externo | No |
+| `worker-fast` | Qwen3.6 35B-A3B Q4_K_M | 65536 | Draft MTP externo | No |
 
 `coder-next-q5` apunta al shard `00001-of-00004`: llama.cpp carga el conjunto
 completo a partir de ese primer archivo, por lo que no se crean perfiles por
@@ -78,3 +81,13 @@ El sidecar Eagle3 de GPT-OSS y el FastMTP de la variante Qwen3.8 Aggressive no
 se activan: su configuración/runtime compatible no está confirmada para esta
 instalación. El último requiere además un parche de llama.cpp según el README
 local.
+
+Los perfiles `worker-*` están orientados a uso como workers (inferencia programática
+mediante API). Comparten el mismo modelo base que `qwen36-mtp` pero difieren en
+contexto y slots paralelos: `worker-default` usa 2 slots para mayor concurrencia,
+`worker-dedicated` usa 131072 de contexto para cargas largas de un único agente, y
+`worker-fast` usa una versión Q4_K_M (menor precisión) para menor latencia. Ninguno
+incluye `MMPROJ_PATH` por lo que no se usan con capacidades multimodales.
+
+`worker-dedicated` está optimizado para cargas largas de un único agente con
+131072 de contexto.
