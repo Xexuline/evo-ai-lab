@@ -4,8 +4,9 @@
 
 ```bash
 evo-model status
-evo-model logs
-ss -ltn | rg ':8080'
+evo-model logs worker
+evo-model logs agent
+ss -ltn | rg ':8080|:8081'
 ```
 
 Comprueban, respectivamente, el ciclo de vida, los errores recientes y la escucha. Si la unidad no carga, confirmar que `evo-model` y la unidad instalada existen y que la toolbox sigue teniendo el mismo nombre. Si escucha localmente pero no desde el N150, investigar red o firewall sin exponer el EVO a Internet.

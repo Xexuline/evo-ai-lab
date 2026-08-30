@@ -1,21 +1,22 @@
-# `evo-model` v1 — implementado y desplegado
+# `evo-model` — instancias locales de inferencia
 
-`evo-model` es un gestor local de **un único perfil activo** de `llama.cpp`.
-Está desplegado en el EVO-X3 con el perfil inicial `qwen38-q4`. La migración
-desde `llama-qwen38.service` se validó correctamente; la unidad anterior puede
-conservarse temporalmente como mecanismo de rollback.
+`evo-model` es un gestor local de hasta dos instancias independientes de
+`llama.cpp`: `worker` (8080, trabajos programáticos) y `agent` (8081, agentes
+residentes). PROFILE define modelo y runtime; INSTANCE define selección, lock,
+servicio y puerto. El N150 seguirá siendo control plane, pero esta versión no
+implementa control remoto, SSH ni una API de control.
 
 ## Arquitectura
 
 ```text
-evo-model start <perfil>
+evo-model start worker <perfil>
   -> valida config/models/<perfil>.conf y el modelo/contenedor
-  -> guarda ~/.local/state/evo-model/selected-profile (modo 0600)
-  -> systemctl --user start evo-model.service
-  -> evo-model run-selected -> distrobox enter <container> -> llama-server
+  -> guarda ~/.local/state/evo-model/worker/selected-profile (modo 0600)
+  -> systemctl --user start evo-model@worker.service
+  -> evo-model run-selected worker -> distrobox enter <container> -> llama-server
 ```
 
-La unidad genérica `systemd/evo-model.service` ejecuta el perfil seleccionado;
+La unidad plantilla `systemd/evo-model@.service` ejecuta el perfil seleccionado;
 no contiene nombres de modelos ni flags de Qwen. `run-selected` usa `exec` al
 entrar en Distrobox, conservando la cadena de señales: al detener systemd, la
 señal llega al proceso `distrobox` reemplazado y, por tanto, al `llama-server`
@@ -49,11 +50,11 @@ el [catálogo de perfiles](../../config/models/README.md#catálogo-inspeccionado
 ```bash
 evo-model list
 evo-model status
-evo-model start qwen38-q4
-evo-model stop
-evo-model restart
-evo-model logs
-evo-model logs -f
+evo-model start worker worker-default
+evo-model start agent qwen38-q4
+evo-model stop agent
+evo-model restart worker
+evo-model logs agent -f
 ```
 
 ## Autocompletado Bash

@@ -8,9 +8,9 @@ Documentación y configuración reproducible del laboratorio local de IA. El nod
 - Sistema observado: Ubuntu 24.04.4 LTS, kernel `7.0.0-30-generic`.
 - Memoria Linux visible: ~124 GiB, con 1 GiB de VRAM fija y GTT dinámico de ~124 GiB.
 - Runtime recomendado provisionalmente: `llama-vulkan-radv` en Distrobox.
-- Modelo y perfil gestionado actuales: Qwen3.8-27B Q4_K_L con MTP, contexto 65 536 y `llama-server` en el puerto 8080.
+- `evo-model` puede gestionar dos instancias locales simultáneas: `worker` en 8080 y `agent` en 8081.
 
-El servicio expone una API compatible con OpenAI en `http://<EVO_IP>:8080/v1` dentro de la LAN. No debe exponerse directamente a Internet.
+Cada instancia expone una API compatible con OpenAI en `http://<EVO_IP>:8080/v1` o `:8081/v1` dentro de la LAN. No debe exponerse directamente a Internet.
 
 ## Guía de lectura
 
