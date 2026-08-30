@@ -17,6 +17,23 @@ Escuchar en todas las interfaces permite que el N150 consuma el nodo de inferenc
 
 En una fase posterior, el N150 podrá proporcionar routing y acceso controlado a través de LiteLLM y, potencialmente, LAN/Tailscale. Esa capa no está implementada ni verificada en este repositorio.
 
+## Control remoto restringido
+
+El ciclo de vida de los modelos puede controlarse desde el N150 mediante una
+clave SSH dedicada configurada manualmente como *forced command*:
+
+```text
+N150 -> SSH restricted control -> evo-model-remote -> evo-model -> worker / agent
+```
+
+`evo-model-remote` únicamente permite listar, consultar estado y arrancar,
+detener o reiniciar las instancias `worker` y `agent`; no proporciona una shell
+ni acceso a logs o comandos internos. La inferencia sigue viajando directamente
+por HTTP a los puertos 8080/8081. SSH se usa exclusivamente para lifecycle y
+control, dentro de la red de confianza, y este mecanismo no debe exponerse a
+Internet. La asociación de la clave y el `authorized_keys` no se gestiona desde
+este repositorio.
+
 ## Comprobación segura
 
 ```bash

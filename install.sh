@@ -4,10 +4,12 @@ set -euo pipefail
 
 readonly REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly CLI_SOURCE="$REPO_DIR/scripts/evo-model"
+readonly REMOTE_CLI_SOURCE="$REPO_DIR/scripts/evo-model-remote"
 readonly PROFILE_SOURCE_DIR="$REPO_DIR/config/models"
 readonly UNIT_SOURCE="$REPO_DIR/systemd/evo-model@.service"
 readonly COMPLETION_SOURCE="$REPO_DIR/completions/evo-model.bash"
 readonly CLI_DESTINATION="$HOME/.local/bin/evo-model"
+readonly REMOTE_CLI_DESTINATION="$HOME/.local/bin/evo-model-remote"
 readonly EXPECTED_PROFILE_DESTINATION_DIR="$HOME/.local/share/evo-model/models"
 # Test-only override: any path other than the expected user-local directory is
 # rejected before installation or deletion.
@@ -19,6 +21,7 @@ die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 ok() { printf '[OK] %-16s %s\n' "$1" "$2"; }
 
 [[ -f "$CLI_SOURCE" ]] || die "missing required file: $CLI_SOURCE"
+[[ -f "$REMOTE_CLI_SOURCE" ]] || die "missing required file: $REMOTE_CLI_SOURCE"
 [[ -d "$PROFILE_SOURCE_DIR" ]] || die "missing required directory: $PROFILE_SOURCE_DIR"
 [[ -f "$UNIT_SOURCE" ]] || die "missing required file: $UNIT_SOURCE"
 [[ -f "$COMPLETION_SOURCE" ]] || die "missing required file: $COMPLETION_SOURCE"
@@ -39,6 +42,9 @@ mkdir -p \
 
 install -m 755 "$CLI_SOURCE" "$CLI_DESTINATION"
 ok "CLI" "$CLI_DESTINATION"
+
+install -m 755 "$REMOTE_CLI_SOURCE" "$REMOTE_CLI_DESTINATION"
+ok "Remote CLI" "$REMOTE_CLI_DESTINATION"
 
 # This directory is managed by install.sh. Remove only profile files in this
 # exact directory; never remove the directory itself or other file types.
