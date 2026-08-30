@@ -2,8 +2,10 @@
 
 `evo-model` es un gestor local de hasta dos instancias independientes de
 `llama.cpp`: `worker` (8080, trabajos programáticos) y `agent` (8081, agentes
-residentes). PROFILE define modelo y runtime; INSTANCE define selección, lock,
-servicio y puerto. El N150 seguirá siendo control plane, pero esta versión no
+residentes). PROFILE define modelo y metadata; INSTANCE define selección, lock,
+servicio, puerto y runtime Distrobox efectivo. `worker` usa
+`llama-vulkan-worker` y `agent` usa `llama-vulkan-radv`, para aislar sus ciclos
+de vida. El N150 seguirá siendo control plane, pero esta versión no
 implementa control remoto, SSH ni una API de control.
 
 ## Arquitectura
@@ -29,10 +31,10 @@ Los perfiles son datos declarativos con una lista cerrada de claves; no se usa
 guarda el nombre seleccionado, no secretos. `stop` conserva esa selección;
 `restart` la vuelve a usar. El servicio y la disponibilidad de API se consultan
 en vivo con systemd y `GET /v1/models`, por lo que el estado no finge que un
-proceso iniciado esté listo. El runtime efectivo lo determina `CONTAINER`:
-`BACKEND` es solo metadata descriptiva. Por ejemplo, cambiar
-`BACKEND=RADV/Vulkan` sin cambiar `CONTAINER=llama-vulkan-radv` no modifica el
-backend que se ejecuta.
+proceso iniciado esté listo. Para las instancias soportadas el runtime efectivo
+lo determina la instancia, no `CONTAINER` del perfil: `worker` entra en
+`llama-vulkan-worker` y `agent` en `llama-vulkan-radv`. `CONTAINER` permanece
+en los perfiles como metadata compatible; `BACKEND` también es descriptivo.
 
 Los perfiles soportan tanto MTP integrado como un draft model externo. Un
 perfil sin `DRAFT_MODEL_PATH` conserva el comportamiento de MTP integrado; si

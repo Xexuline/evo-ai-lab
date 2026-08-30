@@ -219,6 +219,7 @@ if [[ "$1" == "list" ]]; then
   cat <<'TABLE'
 ID | NAME | STATUS | IMAGE
 abc123 | llama-vulkan-radv | Up | example/radv
+abc124 | llama-vulkan-worker | Up | example/worker
 def456 | llama-vulkan | Up | example/vulkan
 TABLE
 elif [[ "$1" == "enter" ]]; then
@@ -247,7 +248,7 @@ printf 'external-draft\n' > "$STATE_DIR/worker/selected-profile"
 EVO_MODEL_TEST_ARGS="$TEMP_DIR/draft-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected
 cat > "$TEMP_DIR/expected-draft-args" <<EOF
 enter
-llama-vulkan-radv
+llama-vulkan-worker
 --
 llama-server
 -m
@@ -291,7 +292,12 @@ esac
 EOF
 chmod +x "$FAKE_BIN/ss"
 
-PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime good >/dev/null
+legacy_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime good)
+grep -Fxq 'Runtime available for worker: llama-vulkan-worker' <<<"$legacy_runtime_output"
+worker_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime worker good)
+grep -Fxq 'Runtime available for worker: llama-vulkan-worker' <<<"$worker_runtime_output"
+agent_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime agent good)
+grep -Fxq 'Runtime available for agent: llama-vulkan-radv' <<<"$agent_runtime_output"
 EVO_MODEL_TEST_SS_MODE=free PATH="$FAKE_BIN:$PATH" run_manager --check-port good >/dev/null
 EVO_MODEL_TEST_SS_MODE=similar PATH="$FAKE_BIN:$PATH" run_manager --check-port good >/dev/null
 if EVO_MODEL_TEST_SS_MODE=occupied PATH="$FAKE_BIN:$PATH" run_manager --check-port good >"$TEMP_DIR/port-error" 2>&1; then
@@ -316,10 +322,9 @@ SPEC_DRAFT_P_MIN=0
 HOST=127.0.0.1
 PORT=1
 EOF
-if PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime partial-container >/dev/null 2>&1; then
-  echo "expected a partial container name to fail" >&2
-  exit 1
-fi
+# Runtime validation resolves the container from the instance, not profile
+# metadata, so this valid-but-unavailable profile container does not matter.
+PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime partial-container >/dev/null
 
 cat > "$FAKE_BIN/systemctl" <<'EOF'
 #!/usr/bin/env bash
@@ -450,7 +455,14 @@ EVO_MODEL_TEST_COUNTER="$TEMP_DIR/migration-count" PATH="$FAKE_BIN:$PATH" run_ma
 mkdir -p "$STATE_DIR/agent"
 printf 'external-draft\n' > "$STATE_DIR/agent/selected-profile"
 EVO_MODEL_TEST_ARGS="$TEMP_DIR/agent-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+grep -Fxq 'llama-vulkan-radv' "$TEMP_DIR/agent-args"
 grep -Fxq -- '8081' "$TEMP_DIR/agent-args"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/worker-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected worker
+grep -Fxq 'llama-vulkan-worker' "$TEMP_DIR/worker-args"
+if grep -q 'llama-vulkan-radv' "$TEMP_DIR/worker-args"; then
+  echo "worker used agent container" >&2
+  exit 1
+fi
 grep -Fxq 'good' "$STATE_DIR/worker/selected-profile"
 grep -Fxq 'external-draft' "$STATE_DIR/agent/selected-profile"
 printf 'good\n' > "$STATE_DIR/agent/selected-profile"
@@ -462,6 +474,8 @@ grep -Fq 'Instance: worker' "$TEMP_DIR/two-status"
 grep -Fq 'Instance: agent' "$TEMP_DIR/two-status"
 grep -Fq 'Port: 8080' "$TEMP_DIR/two-status"
 grep -Fq 'Port: 8081' "$TEMP_DIR/two-status"
+grep -Fq 'Container: llama-vulkan-worker' "$TEMP_DIR/two-status"
+grep -Fq 'Container: llama-vulkan-radv' "$TEMP_DIR/two-status"
 if PATH="$FAKE_BIN:$PATH" run_manager status invalid >/dev/null 2>&1; then
   echo "expected invalid instance to fail" >&2
   exit 1
