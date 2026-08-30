@@ -1,0 +1,13 @@
+[Unit]
+Description=EVO Model Manager inference runtime (%i)
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/evo-model run-selected %i
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

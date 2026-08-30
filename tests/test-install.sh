@@ -28,12 +28,13 @@ run_installer > "$TEMP_DIR/first-install-output"
 
 CLI_DESTINATION="$TEST_HOME/.local/bin/evo-model"
 PROFILE_DESTINATION_DIR="$TEST_HOME/.local/share/evo-model/models"
-UNIT_DESTINATION="$TEST_HOME/.config/systemd/user/evo-model.service"
+UNIT_DESTINATION="$TEST_HOME/.config/systemd/user/evo-model@.service"
 COMPLETION_DESTINATION="$TEST_HOME/.local/share/bash-completion/completions/evo-model"
 
 [[ -x "$CLI_DESTINATION" ]]
 [[ "$(stat -c '%a' "$CLI_DESTINATION")" == 755 ]]
 [[ -f "$UNIT_DESTINATION" && "$(stat -c '%a' "$UNIT_DESTINATION")" == 644 ]]
+grep -Fxq 'ExecStart=%h/.local/bin/evo-model run-selected %i' "$UNIT_DESTINATION"
 [[ -f "$COMPLETION_DESTINATION" && "$(stat -c '%a' "$COMPLETION_DESTINATION")" == 644 ]]
 for profile in "$ROOT_DIR"/config/models/*.conf; do
   installed_profile="$PROFILE_DESTINATION_DIR/${profile##*/}"

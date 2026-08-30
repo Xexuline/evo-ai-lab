@@ -2,10 +2,18 @@
 
 ## Estado actual
 
-El servicio gestionado activo es la unidad systemd de usuario
-`evo-model.service`, seleccionada mediante `evo-model`. El perfil inicial
-desplegado es [`qwen38-q4`](../config/models/qwen38-q4.conf), que entra en
-`llama-vulkan-radv` y arranca `llama-server` con este perfil:
+`evo-model` administra dos instancias locales independientes: `worker` en el
+puerto 8080 y `agent` en el 8081. Un PROFILE describe modelo/runtime; una
+INSTANCE determina el servicio, estado y puerto efectivo. Ambas APIs de
+llama-server siguen siendo OpenAI-compatible y se consumen directamente. El
+N150 continuará como control plane; esta fase no implementa SSH ni control remoto.
+
+Las unidades systemd de usuario gestionadas son `evo-model@worker.service` y
+`evo-model@agent.service`. Cada una lee exclusivamente la selección de su
+instancia y puede ejecutar un perfil distinto. El perfil inicial documentado,
+[`qwen38-q4`](../config/models/qwen38-q4.conf), entra en
+`llama-vulkan-radv` y arranca `llama-server` con estos parámetros cuando se
+selecciona para una instancia:
 
 - Modelo: Qwen3.8-27B Q4_K_L de Bartowski.
 - Backend: Vulkan/RADV.
@@ -18,8 +26,8 @@ desplegado es [`qwen38-q4`](../config/models/qwen38-q4.conf), que entra en
 El archivo GGUF no está incluido ni debe añadirse al repositorio.
 
 Además del perfil inicial, el catálogo de `evo-model` contiene perfiles para
-los GGUF disponibles en el nodo. El gestor sigue cargando solo **un** perfil a
-la vez. Los perfiles multimodales usan un `mmproj` cuando su asociación está
+los GGUF disponibles en el nodo. Cada instancia carga como máximo **un** perfil;
+`worker` y `agent` pueden cargar perfiles simultáneamente. Los perfiles multimodales usan un `mmproj` cuando su asociación está
 confirmada; Qwen Coder Next se carga indicando el primer shard, con el resto
 del conjunto resuelto por llama.cpp. El detalle del catálogo y los modelos
 deliberadamente excluidos está en [config/models](../config/models/README.md).
@@ -30,25 +38,26 @@ y posible rollback durante la estabilización; esta documentación no afirma que
 haya sido eliminado. La unidad de usuario se encuentra deliberadamente
 deshabilitada para evitar que cargue automáticamente Qwen3.8 al arrancar.
 
-`evo-model.service` es ahora el servicio gestionado mediante `evo-model`. A
-diferencia del servicio anterior, puede estar habilitado al inicio. La carga y
-descarga de modelos debe gestionarse exclusivamente mediante `evo-model`; no se
-deben modificar las unidades systemd de forma manual.
+`evo-model@worker.service` y `evo-model@agent.service` son las unidades
+gestionadas mediante `evo-model`. La carga y descarga de modelos debe
+gestionarse exclusivamente mediante `evo-model`; no se deben modificar las
+unidades systemd de forma manual.
 
 ## Operación con systemd de usuario
 
 ```bash
 evo-model list
 evo-model status
-evo-model start qwen38-q4
-evo-model stop
-evo-model restart
-evo-model logs -f
+evo-model start worker worker-default
+evo-model start agent qwen38-q4
+evo-model stop worker
+evo-model restart agent
+evo-model logs agent -f
 ```
 
 `start` selecciona y carga un perfil tras validarlo; `stop` conserva la
 selección; `restart` vuelve a usarla; `status` no modifica el estado. El gestor
-usa `evo-model.service` internamente. `loginctl enable-linger <usuario>` permite
+usa su propia unidad `evo-model@<instancia>.service` internamente. `loginctl enable-linger <usuario>` permite
 que el systemd user manager arranque durante el boot y mantenga servicios de
 usuario sin requerir una sesión gráfica ni interactiva. Por ello el servicio
 puede continuar después de cerrar sesión. El EVO tiene `Linger=yes` observado.

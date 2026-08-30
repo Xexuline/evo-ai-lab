@@ -219,6 +219,7 @@ if [[ "$1" == "list" ]]; then
   cat <<'TABLE'
 ID | NAME | STATUS | IMAGE
 abc123 | llama-vulkan-radv | Up | example/radv
+abc124 | llama-vulkan-worker | Up | example/worker
 def456 | llama-vulkan | Up | example/vulkan
 TABLE
 elif [[ "$1" == "enter" ]]; then
@@ -235,7 +236,7 @@ if grep -Fxq -- '--spec-draft-model' "$TEMP_DIR/no-draft-args" || grep -Fxq -- '
   exit 1
 fi
 
-printf 'no-spec\n' > "$STATE_DIR/selected-profile"
+printf 'no-spec\n' > "$STATE_DIR/worker/selected-profile"
 EVO_MODEL_TEST_ARGS="$TEMP_DIR/no-spec-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected
 grep -Fxq -- '--mmproj' "$TEMP_DIR/no-spec-args"
 if grep -Fq -- '--spec-' "$TEMP_DIR/no-spec-args"; then
@@ -243,11 +244,11 @@ if grep -Fq -- '--spec-' "$TEMP_DIR/no-spec-args"; then
   exit 1
 fi
 
-printf 'external-draft\n' > "$STATE_DIR/selected-profile"
+printf 'external-draft\n' > "$STATE_DIR/worker/selected-profile"
 EVO_MODEL_TEST_ARGS="$TEMP_DIR/draft-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected
 cat > "$TEMP_DIR/expected-draft-args" <<EOF
 enter
-llama-vulkan-radv
+llama-vulkan-worker
 --
 llama-server
 -m
@@ -291,7 +292,12 @@ esac
 EOF
 chmod +x "$FAKE_BIN/ss"
 
-PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime good >/dev/null
+legacy_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime good)
+grep -Fxq 'Runtime available for worker: llama-vulkan-worker' <<<"$legacy_runtime_output"
+worker_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime worker good)
+grep -Fxq 'Runtime available for worker: llama-vulkan-worker' <<<"$worker_runtime_output"
+agent_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime agent good)
+grep -Fxq 'Runtime available for agent: llama-vulkan-radv' <<<"$agent_runtime_output"
 EVO_MODEL_TEST_SS_MODE=free PATH="$FAKE_BIN:$PATH" run_manager --check-port good >/dev/null
 EVO_MODEL_TEST_SS_MODE=similar PATH="$FAKE_BIN:$PATH" run_manager --check-port good >/dev/null
 if EVO_MODEL_TEST_SS_MODE=occupied PATH="$FAKE_BIN:$PATH" run_manager --check-port good >"$TEMP_DIR/port-error" 2>&1; then
@@ -316,10 +322,9 @@ SPEC_DRAFT_P_MIN=0
 HOST=127.0.0.1
 PORT=1
 EOF
-if PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime partial-container >/dev/null 2>&1; then
-  echo "expected a partial container name to fail" >&2
-  exit 1
-fi
+# Runtime validation resolves the container from the instance, not profile
+# metadata, so this valid-but-unavailable profile container does not matter.
+PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime partial-container >/dev/null
 
 cat > "$FAKE_BIN/systemctl" <<'EOF'
 #!/usr/bin/env bash
@@ -338,17 +343,17 @@ printf '{"data":[{"id":"model.gguf"}]}'
 EOF
 chmod +x "$FAKE_BIN/systemctl" "$FAKE_BIN/curl"
 mkdir -p "$STATE_DIR"
-printf 'good\n' > "$STATE_DIR/selected-profile"
+printf 'good\n' > "$STATE_DIR/worker/selected-profile"
 status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
 [[ "$status_output" == *"API: ready"* ]]
 [[ "$status_output" == *"Listen: 127.0.0.1:8080"* ]]
 [[ "$status_output" == *"Health endpoint: http://127.0.0.1:8080/v1/models"* ]]
 
-printf 'external-draft\n' > "$STATE_DIR/selected-profile"
+printf 'external-draft\n' > "$STATE_DIR/worker/selected-profile"
 status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
 [[ "$status_output" == *"Draft model: draft.gguf"* ]]
 [[ "$status_output" == *"MMProj: mmproj.gguf"* ]]
-printf 'good\n' > "$STATE_DIR/selected-profile"
+printf 'good\n' > "$STATE_DIR/worker/selected-profile"
 
 cat > "$FAKE_BIN/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -356,7 +361,7 @@ printf '{"data":[{"id":"another-model.gguf"}]}'
 EOF
 chmod +x "$FAKE_BIN/curl"
 status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
-[[ "$status_output" == *"API: not ready"* ]]
+[[ "$status_output" == *"API: not-ready"* ]]
 
 # Transient curl failures stay silent while each poll reports elapsed time. The
 # counter makes the successful response arrive only after multiple failures.
@@ -437,6 +442,106 @@ if EVO_MODEL_TEST_COUNTER="$TEMP_DIR/systemctl-count" PATH="$FAKE_BIN:$PATH" EVO
 fi
 if grep -q 'API ready' "$TEMP_DIR/health-output"; then
   echo "health check accepted an API after service shutdown" >&2
+  exit 1
+fi
+
+# Named instances keep selections separate, override the profile port, and
+# retain the old global selection as worker state on first use.
+rm -rf "$STATE_DIR"
+mkdir -p "$STATE_DIR"
+printf 'good\n' > "$STATE_DIR/selected-profile"
+EVO_MODEL_TEST_COUNTER="$TEMP_DIR/migration-count" PATH="$FAKE_BIN:$PATH" run_manager status worker > "$TEMP_DIR/worker-status"
+[[ -f "$STATE_DIR/worker/selected-profile" && ! -e "$STATE_DIR/selected-profile" ]]
+mkdir -p "$STATE_DIR/agent"
+printf 'external-draft\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/agent-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+grep -Fxq 'llama-vulkan-radv' "$TEMP_DIR/agent-args"
+grep -Fxq -- '8081' "$TEMP_DIR/agent-args"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/worker-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected worker
+grep -Fxq 'llama-vulkan-worker' "$TEMP_DIR/worker-args"
+if grep -q 'llama-vulkan-radv' "$TEMP_DIR/worker-args"; then
+  echo "worker used agent container" >&2
+  exit 1
+fi
+grep -Fxq 'good' "$STATE_DIR/worker/selected-profile"
+grep -Fxq 'external-draft' "$STATE_DIR/agent/selected-profile"
+printf 'good\n' > "$STATE_DIR/agent/selected-profile"
+same_profile_list=$(PATH="$FAKE_BIN:$PATH" run_manager list)
+grep -Fxq 'good                     selected:worker,agent' <<<"$same_profile_list"
+printf 'external-draft\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_COUNTER="$TEMP_DIR/two-status-count" PATH="$FAKE_BIN:$PATH" run_manager status > "$TEMP_DIR/two-status"
+grep -Fq 'Instance: worker' "$TEMP_DIR/two-status"
+grep -Fq 'Instance: agent' "$TEMP_DIR/two-status"
+grep -Fq 'Port: 8080' "$TEMP_DIR/two-status"
+grep -Fq 'Port: 8081' "$TEMP_DIR/two-status"
+grep -Fq 'Container: llama-vulkan-worker' "$TEMP_DIR/two-status"
+grep -Fq 'Container: llama-vulkan-radv' "$TEMP_DIR/two-status"
+if PATH="$FAKE_BIN:$PATH" run_manager status invalid >/dev/null 2>&1; then
+  echo "expected invalid instance to fail" >&2
+  exit 1
+fi
+
+# Instance operations must only address their own systemd unit, lock, and
+# journal. A worker lock must not prevent a legitimate agent operation.
+cat > "$FAKE_BIN/systemctl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$EVO_MODEL_TEST_SYSTEMCTL_LOG"
+if [[ "$*" == *"is-active"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"show"* ]]; then
+  printf '123\n'
+fi
+EOF
+cat > "$FAKE_BIN/journalctl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$EVO_MODEL_TEST_JOURNAL_LOG"
+EOF
+chmod +x "$FAKE_BIN/systemctl" "$FAKE_BIN/journalctl"
+printf 'good\n' > "$STATE_DIR/worker/selected-profile"
+printf 'external-draft\n' > "$STATE_DIR/agent/selected-profile"
+
+EVO_MODEL_TEST_SYSTEMCTL_LOG="$TEMP_DIR/worker-stop.log" PATH="$FAKE_BIN:$PATH" \
+  run_manager stop worker >/dev/null
+grep -Fxq -- '--user stop evo-model@worker.service' "$TEMP_DIR/worker-stop.log"
+if grep -q 'agent' "$TEMP_DIR/worker-stop.log"; then
+  echo "worker stop addressed agent service" >&2
+  exit 1
+fi
+
+mkdir -p "$STATE_DIR/worker"
+exec 8>"$STATE_DIR/worker/manager.lock"
+flock -n 8
+if PATH="$FAKE_BIN:$PATH" run_manager stop worker >/dev/null 2>&1; then
+  echo "expected worker operation to respect worker lock" >&2
+  exit 1
+fi
+EVO_MODEL_TEST_SYSTEMCTL_LOG="$TEMP_DIR/agent-stop.log" PATH="$FAKE_BIN:$PATH" \
+  run_manager stop agent >/dev/null
+flock -u 8
+exec 8>&-
+grep -Fxq -- '--user stop evo-model@agent.service' "$TEMP_DIR/agent-stop.log"
+
+EVO_MODEL_TEST_JOURNAL_LOG="$TEMP_DIR/worker-journal.log" PATH="$FAKE_BIN:$PATH" \
+  run_manager logs worker >/dev/null
+grep -Fxq -- '--user -u evo-model@worker.service --no-pager' "$TEMP_DIR/worker-journal.log"
+EVO_MODEL_TEST_JOURNAL_LOG="$TEMP_DIR/agent-journal.log" PATH="$FAKE_BIN:$PATH" \
+  run_manager logs agent -f >/dev/null
+grep -Fxq -- '--user -u evo-model@agent.service -f' "$TEMP_DIR/agent-journal.log"
+
+EVO_MODEL_TEST_SYSTEMCTL_LOG="$TEMP_DIR/worker-start.log" PATH="$FAKE_BIN:$PATH" \
+  run_manager start worker good >/dev/null
+grep -Fxq -- '--user start evo-model@worker.service' "$TEMP_DIR/worker-start.log"
+if grep -q 'evo-model@agent.service' "$TEMP_DIR/worker-start.log"; then
+  echo "worker start addressed agent service" >&2
+  exit 1
+fi
+EVO_MODEL_TEST_SYSTEMCTL_LOG="$TEMP_DIR/agent-restart.log" PATH="$FAKE_BIN:$PATH" \
+  run_manager restart agent >/dev/null
+grep -Fxq -- '--user stop evo-model@agent.service' "$TEMP_DIR/agent-restart.log"
+grep -Fxq -- '--user start evo-model@agent.service' "$TEMP_DIR/agent-restart.log"
+if grep -q 'evo-model@worker.service' "$TEMP_DIR/agent-restart.log"; then
+  echo "agent restart addressed worker service" >&2
   exit 1
 fi
 

@@ -1,21 +1,24 @@
-# `evo-model` v1 — implementado y desplegado
+# `evo-model` — instancias locales de inferencia
 
-`evo-model` es un gestor local de **un único perfil activo** de `llama.cpp`.
-Está desplegado en el EVO-X3 con el perfil inicial `qwen38-q4`. La migración
-desde `llama-qwen38.service` se validó correctamente; la unidad anterior puede
-conservarse temporalmente como mecanismo de rollback.
+`evo-model` es un gestor local de hasta dos instancias independientes de
+`llama.cpp`: `worker` (8080, trabajos programáticos) y `agent` (8081, agentes
+residentes). PROFILE define modelo y metadata; INSTANCE define selección, lock,
+servicio, puerto y runtime Distrobox efectivo. `worker` usa
+`llama-vulkan-worker` y `agent` usa `llama-vulkan-radv`, para aislar sus ciclos
+de vida. El N150 seguirá siendo control plane, pero esta versión no
+implementa control remoto, SSH ni una API de control.
 
 ## Arquitectura
 
 ```text
-evo-model start <perfil>
+evo-model start worker <perfil>
   -> valida config/models/<perfil>.conf y el modelo/contenedor
-  -> guarda ~/.local/state/evo-model/selected-profile (modo 0600)
-  -> systemctl --user start evo-model.service
-  -> evo-model run-selected -> distrobox enter <container> -> llama-server
+  -> guarda ~/.local/state/evo-model/worker/selected-profile (modo 0600)
+  -> systemctl --user start evo-model@worker.service
+  -> evo-model run-selected worker -> distrobox enter <container> -> llama-server
 ```
 
-La unidad genérica `systemd/evo-model.service` ejecuta el perfil seleccionado;
+La unidad plantilla `systemd/evo-model@.service` ejecuta el perfil seleccionado;
 no contiene nombres de modelos ni flags de Qwen. `run-selected` usa `exec` al
 entrar en Distrobox, conservando la cadena de señales: al detener systemd, la
 señal llega al proceso `distrobox` reemplazado y, por tanto, al `llama-server`
@@ -28,10 +31,10 @@ Los perfiles son datos declarativos con una lista cerrada de claves; no se usa
 guarda el nombre seleccionado, no secretos. `stop` conserva esa selección;
 `restart` la vuelve a usar. El servicio y la disponibilidad de API se consultan
 en vivo con systemd y `GET /v1/models`, por lo que el estado no finge que un
-proceso iniciado esté listo. El runtime efectivo lo determina `CONTAINER`:
-`BACKEND` es solo metadata descriptiva. Por ejemplo, cambiar
-`BACKEND=RADV/Vulkan` sin cambiar `CONTAINER=llama-vulkan-radv` no modifica el
-backend que se ejecuta.
+proceso iniciado esté listo. Para las instancias soportadas el runtime efectivo
+lo determina la instancia, no `CONTAINER` del perfil: `worker` entra en
+`llama-vulkan-worker` y `agent` en `llama-vulkan-radv`. `CONTAINER` permanece
+en los perfiles como metadata compatible; `BACKEND` también es descriptivo.
 
 Los perfiles soportan tanto MTP integrado como un draft model externo. Un
 perfil sin `DRAFT_MODEL_PATH` conserva el comportamiento de MTP integrado; si
@@ -49,11 +52,11 @@ el [catálogo de perfiles](../../config/models/README.md#catálogo-inspeccionado
 ```bash
 evo-model list
 evo-model status
-evo-model start qwen38-q4
-evo-model stop
-evo-model restart
-evo-model logs
-evo-model logs -f
+evo-model start worker worker-default
+evo-model start agent qwen38-q4
+evo-model stop agent
+evo-model restart worker
+evo-model logs agent -f
 ```
 
 ## Autocompletado Bash
