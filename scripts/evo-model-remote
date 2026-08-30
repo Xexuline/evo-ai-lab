@@ -34,8 +34,19 @@ case ${remote_args[1]:-} in
     exec "$EVO_MODEL_BIN" list
     ;;
   status)
-    ((${#remote_args[@]} == 2)) || die 'usage: evo-model status'
-    exec "$EVO_MODEL_BIN" status
+    case ${#remote_args[@]} in
+      2) exec "$EVO_MODEL_BIN" status ;;
+      3)
+        [[ ${remote_args[2]} == --json ]] || die 'usage: evo-model status [worker|agent] [--json]'
+        exec "$EVO_MODEL_BIN" status --json
+        ;;
+      4)
+        valid_instance "${remote_args[2]}" || die 'usage: evo-model status [worker|agent] [--json]'
+        [[ ${remote_args[3]} == --json ]] || die 'usage: evo-model status [worker|agent] [--json]'
+        exec "$EVO_MODEL_BIN" status "${remote_args[2]}" --json
+        ;;
+      *) die 'usage: evo-model status [worker|agent] [--json]' ;;
+    esac
     ;;
   start)
     ((${#remote_args[@]} == 4)) || die 'usage: evo-model start <worker|agent> <profile>'

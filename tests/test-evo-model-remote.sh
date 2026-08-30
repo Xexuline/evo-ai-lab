@@ -38,6 +38,9 @@ expect_rejected() {
 }
 
 run_allowed 'evo-model status' 'status'
+run_allowed 'evo-model status --json' $'status\n--json'
+run_allowed 'evo-model status worker --json' $'status\nworker\n--json'
+run_allowed 'evo-model status agent --json' $'status\nagent\n--json'
 run_allowed 'evo-model list' 'list'
 run_allowed 'evo-model start worker worker-default' $'start\nworker\nworker-default'
 run_allowed 'evo-model start agent worker-fast' $'start\nagent\nworker-fast'
@@ -58,6 +61,8 @@ expect_rejected 'evo-model stop database'
 expect_rejected 'evo-model start worker bad;profile'
 expect_rejected 'evo-model start worker ../worker-default'
 expect_rejected 'evo-model status worker'
+expect_rejected 'evo-model status agent'
+expect_rejected 'evo-model status --json worker'
 expect_rejected 'evo-model stop worker extra'
 
 # These are passed as inert text to the parser; none can cause shell execution.

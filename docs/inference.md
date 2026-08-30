@@ -48,6 +48,7 @@ unidades systemd de forma manual.
 ```bash
 evo-model list
 evo-model status
+evo-model status --json
 evo-model start worker worker-default
 evo-model start agent qwen38-q4
 evo-model stop worker
@@ -61,6 +62,14 @@ usa su propia unidad `evo-model@<instancia>.service` internamente. `loginctl ena
 que el systemd user manager arranque durante el boot y mantenga servicios de
 usuario sin requerir una sesión gráfica ni interactiva. Por ello el servicio
 puede continuar después de cerrar sesión. El EVO tiene `Linger=yes` observado.
+
+`evo-model status --json` es la interfaz estable para automatización, incluido
+el control plane N150. Conserva siempre el objeto raíz `instances`, incluso al
+consultar una sola instancia (`evo-model status worker --json`). Por ejemplo:
+
+```json
+{"instances":{"worker":{"context_total":131072,"parallel_slots":2,"context_per_slot":65536}}}
+```
 
 Usamos systemd para que el proceso tenga ciclo de vida declarativo, reinicio ante fallo y logs centralizados. Usamos Distrobox como runtime para fijar el stack de inferencia sin instalarlo directamente en el host.
 

@@ -67,6 +67,22 @@ PORT=8080
 EOF
 run_manager --validate-profile external-draft >/dev/null
 
+write_profile context-two <<'EOF'
+PROFILE_NAME=context-two
+MODEL_PATH=@MODEL@
+BACKEND=RADV/Vulkan
+CONTAINER=llama-vulkan-radv
+CONTEXT_SIZE=131072
+GPU_LAYERS=999
+PARALLEL_SLOTS=2
+SPEC_TYPE=draft-mtp
+SPEC_DRAFT_N_MAX=2
+SPEC_DRAFT_P_MIN=0.8
+HOST=127.0.0.1
+PORT=8080
+EOF
+run_manager --validate-profile context-two >/dev/null
+
 write_profile no-spec <<'EOF'
 PROFILE_NAME=no-spec
 MODEL_PATH=@MODEL@
@@ -348,6 +364,51 @@ status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
 [[ "$status_output" == *"API: ready"* ]]
 [[ "$status_output" == *"Listen: 127.0.0.1:8080"* ]]
 [[ "$status_output" == *"Health endpoint: http://127.0.0.1:8080/v1/models"* ]]
+expected_status=$(printf 'Instance: worker\nProfile: good\nService: active\nAPI: ready\nBackend: RADV/Vulkan\nContainer: llama-vulkan-worker\nModel: %s\nContext: 65536\nParallel slots: 1\nHost: 127.0.0.1\nPort: 8080\nListen: 127.0.0.1:8080\nHealth endpoint: http://127.0.0.1:8080/v1/models\nPID: 123\n\nInstance: agent\nProfile: (none selected)\nService: active\nAPI: not applicable\nContainer: llama-vulkan-radv\n' "$MODEL_FILE")
+[[ "$status_output" == "$expected_status" ]]
+
+# The JSON interface preserves a fixed root schema, uses JSON numbers for the
+# capacity fields, and represents unavailable selected-profile data as null.
+printf 'context-two\n' > "$STATE_DIR/worker/selected-profile"
+mkdir -p "$STATE_DIR/agent"
+printf 'external-draft\n' > "$STATE_DIR/agent/selected-profile"
+PATH="$FAKE_BIN:$PATH" run_manager status --json > "$TEMP_DIR/status.json"
+python3 - "$TEMP_DIR/status.json" "$MMPROJ_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as status_file:
+    status = json.load(status_file)
+
+instances = status["instances"]
+assert set(instances) == {"worker", "agent"}
+worker = instances["worker"]
+agent = instances["agent"]
+assert worker["context_total"] == 131072
+assert worker["parallel_slots"] == 2
+assert worker["context_per_slot"] == 65536
+assert agent["context_total"] == 65536
+assert agent["parallel_slots"] == 1
+assert agent["context_per_slot"] == 65536
+assert worker["mmproj"] is None
+assert agent["mmproj"] == sys.argv[2]
+for instance in instances.values():
+    for field in ("context_total", "parallel_slots", "context_per_slot", "port", "pid"):
+        assert isinstance(instance[field], int), (field, instance[field])
+assert worker["draft_model"] is None
+PY
+PATH="$FAKE_BIN:$PATH" run_manager status worker --json > "$TEMP_DIR/worker-status.json"
+python3 - "$TEMP_DIR/worker-status.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as status_file:
+    assert set(json.load(status_file)["instances"]) == {"worker"}
+PY
+rm -f -- "$STATE_DIR/agent/selected-profile"
+PATH="$FAKE_BIN:$PATH" run_manager status agent --json > "$TEMP_DIR/unselected-agent-status.json"
+grep -Fq '"profile": null' "$TEMP_DIR/unselected-agent-status.json"
+grep -Fq '"context_total": null' "$TEMP_DIR/unselected-agent-status.json"
+printf 'good\n' > "$STATE_DIR/worker/selected-profile"
 
 printf 'external-draft\n' > "$STATE_DIR/worker/selected-profile"
 status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
