@@ -27,12 +27,16 @@ run_installer() {
 run_installer > "$TEMP_DIR/first-install-output"
 
 CLI_DESTINATION="$TEST_HOME/.local/bin/evo-model"
+REMOTE_CLI_DESTINATION="$TEST_HOME/.local/bin/evo-model-remote"
 PROFILE_DESTINATION_DIR="$TEST_HOME/.local/share/evo-model/models"
 UNIT_DESTINATION="$TEST_HOME/.config/systemd/user/evo-model@.service"
 COMPLETION_DESTINATION="$TEST_HOME/.local/share/bash-completion/completions/evo-model"
 
 [[ -x "$CLI_DESTINATION" ]]
 [[ "$(stat -c '%a' "$CLI_DESTINATION")" == 755 ]]
+[[ -x "$REMOTE_CLI_DESTINATION" ]]
+[[ "$(stat -c '%a' "$REMOTE_CLI_DESTINATION")" == 755 ]]
+cmp -s "$ROOT_DIR/scripts/evo-model-remote" "$REMOTE_CLI_DESTINATION"
 [[ -f "$UNIT_DESTINATION" && "$(stat -c '%a' "$UNIT_DESTINATION")" == 644 ]]
 grep -Fxq 'ExecStart=%h/.local/bin/evo-model run-selected %i' "$UNIT_DESTINATION"
 [[ -f "$COMPLETION_DESTINATION" && "$(stat -c '%a' "$COMPLETION_DESTINATION")" == 644 ]]
@@ -48,8 +52,10 @@ grep -Fxq -- '--user daemon-reload' "$SYSTEMCTL_LOG"
 printf 'LOCAL_PROFILE=obsolete\n' > "$PROFILE_DESTINATION_DIR/local-custom.conf"
 printf 'keep\n' > "$PROFILE_DESTINATION_DIR/notes.txt"
 printf 'outdated\n' > "$CLI_DESTINATION"
+printf 'outdated\n' > "$REMOTE_CLI_DESTINATION"
 run_installer > "$TEMP_DIR/second-install-output"
 cmp -s "$ROOT_DIR/scripts/evo-model" "$CLI_DESTINATION"
+cmp -s "$ROOT_DIR/scripts/evo-model-remote" "$REMOTE_CLI_DESTINATION"
 [[ ! -e "$PROFILE_DESTINATION_DIR/local-custom.conf" ]]
 [[ -f "$PROFILE_DESTINATION_DIR/notes.txt" ]]
 

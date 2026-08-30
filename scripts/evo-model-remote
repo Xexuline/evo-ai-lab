@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Restricted OpenSSH forced-command entry point for evo-model lifecycle control.
+set -euo pipefail
+
+readonly PROGRAM=evo-model-remote
+readonly EVO_MODEL_BIN=/home/evo/.local/bin/evo-model
+
+die() {
+  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  exit 1
+}
+
+valid_instance() {
+  [[ $1 == worker || $1 == agent ]]
+}
+
+# Profile names in this repository use lowercase letters, digits, and hyphens.
+valid_profile_name() {
+  [[ $1 =~ ^[a-z0-9][a-z0-9-]*$ ]]
+}
+
+[[ -n ${SSH_ORIGINAL_COMMAND:-} ]] || die 'empty SSH command is not allowed'
+
+# This only splits on whitespace. It does not evaluate quotes, expansions,
+# command substitutions, operators, or redirections as shell syntax.
+IFS=$' \t\n' read -r -a remote_args <<<"$SSH_ORIGINAL_COMMAND"
+((${#remote_args[@]} > 0)) || die 'empty SSH command is not allowed'
+
+[[ ${remote_args[0]} == evo-model ]] || die 'only evo-model commands are allowed'
+
+case ${remote_args[1]:-} in
+  list)
+    ((${#remote_args[@]} == 2)) || die 'usage: evo-model list'
+    exec "$EVO_MODEL_BIN" list
+    ;;
+  status)
+    ((${#remote_args[@]} == 2)) || die 'usage: evo-model status'
+    exec "$EVO_MODEL_BIN" status
+    ;;
+  start)
+    ((${#remote_args[@]} == 4)) || die 'usage: evo-model start <worker|agent> <profile>'
+    valid_instance "${remote_args[2]}" || die 'invalid instance (expected worker or agent)'
+    valid_profile_name "${remote_args[3]}" || die 'invalid profile name'
+    exec "$EVO_MODEL_BIN" start "${remote_args[2]}" "${remote_args[3]}"
+    ;;
+  stop)
+    ((${#remote_args[@]} == 3)) || die 'usage: evo-model stop <worker|agent>'
+    valid_instance "${remote_args[2]}" || die 'invalid instance (expected worker or agent)'
+    exec "$EVO_MODEL_BIN" stop "${remote_args[2]}"
+    ;;
+  restart)
+    ((${#remote_args[@]} == 3)) || die 'usage: evo-model restart <worker|agent>'
+    valid_instance "${remote_args[2]}" || die 'invalid instance (expected worker or agent)'
+    exec "$EVO_MODEL_BIN" restart "${remote_args[2]}"
+    ;;
+  '')
+    die 'missing evo-model command'
+    ;;
+  *)
+    die 'requested evo-model command is not allowed'
+    ;;
+esac
