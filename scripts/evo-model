@@ -79,18 +79,79 @@ service_name() {
   printf 'evo-model@%s.service\n' "$1"
 }
 
-valid_key(){ case $1 in PROFILE_NAME|MODEL_PATH|BACKEND|CONTAINER|CONTEXT_SIZE|GPU_LAYERS|PARALLEL_SLOTS|SPEC_TYPE|DRAFT_MODEL_PATH|DRAFT_GPU_LAYERS|MMPROJ_PATH|SPEC_DRAFT_N_MAX|SPEC_DRAFT_P_MIN|HOST|PORT) return;; *) return 1;; esac; }
-reset_profile(){ PROFILE_NAME= MODEL_PATH= BACKEND= CONTAINER= CONTEXT_SIZE= GPU_LAYERS= PARALLEL_SLOTS= SPEC_TYPE= DRAFT_MODEL_PATH= DRAFT_GPU_LAYERS= MMPROJ_PATH= SPEC_DRAFT_N_MAX= SPEC_DRAFT_P_MIN= HOST= PORT=; }
+valid_key(){ case $1 in PROFILE_NAME|MODEL_PATH|BACKEND|CONTAINER|CONTEXT_SIZE|GPU_LAYERS|PARALLEL_SLOTS|SPEC_TYPE|DRAFT_MODEL_PATH|DRAFT_GPU_LAYERS|MMPROJ_PATH|FLASH_ATTN|BATCH_SIZE|UBATCH_SIZE|CACHE_TYPE_K|CACHE_TYPE_V|LAZY_MODE|JINJA|REASONING|REASONING_PRESERVE|RUNTIME_CONTAINER|SERVER_PATH|SPEC_DRAFT_ADAPTIVE|SPEC_DRAFT_N_MIN|SPEC_DRAFT_N_MAX|SPEC_DRAFT_P_MIN|HOST|PORT) return;; *) return 1;; esac; }
+reset_profile(){ PROFILE_NAME= MODEL_PATH= BACKEND= CONTAINER= CONTEXT_SIZE= GPU_LAYERS= PARALLEL_SLOTS= SPEC_TYPE= DRAFT_MODEL_PATH= DRAFT_GPU_LAYERS= MMPROJ_PATH= FLASH_ATTN= BATCH_SIZE= UBATCH_SIZE= CACHE_TYPE_K= CACHE_TYPE_V= LAZY_MODE= JINJA= REASONING= REASONING_PRESERVE= RUNTIME_CONTAINER= SERVER_PATH= SPEC_DRAFT_ADAPTIVE= SPEC_DRAFT_N_MIN= SPEC_DRAFT_N_MAX= SPEC_DRAFT_P_MIN= HOST= PORT=; }
 profile_path(){ [[ $1 =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "invalid profile name: $1"; printf '%s/%s.conf\n' "$PROFILE_DIR" "$1"; }
 load_profile(){ local profile=$1 file line key value n=0; file=$(profile_path "$profile"); [[ -f $file ]] || die "profile not found: $profile"; reset_profile; while IFS= read -r line || [[ -n $line ]]; do n=$((n+1)); [[ -z $line || $line == \#* ]] && continue; [[ $line == *=* ]] || die "$file:$n: expected KEY=VALUE"; key=${line%%=*}; value=${line#*=}; valid_key "$key" || die "$file:$n: unsupported key: $key"; [[ -n $value && ! $value =~ [[:cntrl:]] ]] || die "$file:$n: invalid or empty value"; [[ -z ${!key+x} || -z ${!key} ]] || die "$file:$n: duplicate key: $key"; printf -v "$key" '%s' "$value"; done < "$file"; [[ $PROFILE_NAME == "$profile" ]] || die "$file: PROFILE_NAME must equal filename ($profile)"; }
 is_uint(){ [[ $1 =~ ^[0-9]+$ ]]; }; is_decimal_0_1(){ [[ $1 =~ ^(0|1|0\.[0-9]+|1\.0+)$ ]]; }; is_host(){ [[ $1 =~ ^[A-Za-z0-9.:_-]+$ ]]; }
-validate_loaded_profile(){ local key; for key in PROFILE_NAME MODEL_PATH BACKEND CONTAINER CONTEXT_SIZE GPU_LAYERS PARALLEL_SLOTS SPEC_DRAFT_N_MAX SPEC_DRAFT_P_MIN HOST PORT; do [[ -n ${!key} ]] || die "profile $PROFILE_NAME: missing required key $key"; done; [[ $MODEL_PATH = /* && -f $MODEL_PATH ]] || die "profile $PROFILE_NAME: model not found or not absolute: $MODEL_PATH"; [[ -z $MMPROJ_PATH || ( $MMPROJ_PATH = /* && -f $MMPROJ_PATH ) ]] || die "profile $PROFILE_NAME: multimodal projector not found or not absolute: $MMPROJ_PATH"; if [[ -n $DRAFT_MODEL_PATH || -n $DRAFT_GPU_LAYERS ]]; then [[ -n $DRAFT_MODEL_PATH && -n $DRAFT_GPU_LAYERS && -n $SPEC_TYPE && $DRAFT_MODEL_PATH = /* && -f $DRAFT_MODEL_PATH ]] || die "profile $PROFILE_NAME: invalid external draft"; is_uint "$DRAFT_GPU_LAYERS" || die "profile $PROFILE_NAME: DRAFT_GPU_LAYERS must be a non-negative integer"; fi; [[ $CONTAINER =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "profile $PROFILE_NAME: invalid CONTAINER"; is_uint "$CONTEXT_SIZE" && [[ $CONTEXT_SIZE -gt 0 ]] || die "profile $PROFILE_NAME: invalid CONTEXT_SIZE"; is_uint "$GPU_LAYERS" || die "profile $PROFILE_NAME: invalid GPU_LAYERS"; is_uint "$PARALLEL_SLOTS" && [[ $PARALLEL_SLOTS -gt 0 ]] || die "profile $PROFILE_NAME: invalid PARALLEL_SLOTS"; [[ -z $SPEC_TYPE || $SPEC_TYPE =~ ^[A-Za-z0-9_-]+$ ]] || die "profile $PROFILE_NAME: invalid SPEC_TYPE"; is_uint "$SPEC_DRAFT_N_MAX" && is_decimal_0_1 "$SPEC_DRAFT_P_MIN" && is_host "$HOST" && is_uint "$PORT" && [[ $PORT -ge 1 && $PORT -le 65535 ]] || die "profile $PROFILE_NAME: invalid numeric, host, or port setting"; }
-validate_runtime(){ local instance=$1 container; container=$(instance_container "$instance"); command -v distrobox >/dev/null 2>&1 || die "distrobox is not available"; distrobox list --no-color 2>/dev/null | awk -F '|' -v c="$container" 'function t(v){gsub(/^[[:space:]]+|[[:space:]]+$/, "",v);return v} {if(t($2)==c) found=1} END{exit !found}' || die "instance $instance: Distrobox container not found: $container"; }
+validate_loaded_profile(){ local key; for key in PROFILE_NAME MODEL_PATH BACKEND CONTAINER CONTEXT_SIZE GPU_LAYERS PARALLEL_SLOTS HOST PORT; do [[ -n ${!key} ]] || die "profile $PROFILE_NAME: missing required key $key"; done; [[ $MODEL_PATH = /* && -f $MODEL_PATH ]] || die "profile $PROFILE_NAME: model not found or not absolute: $MODEL_PATH"; [[ -z $MMPROJ_PATH || ( $MMPROJ_PATH = /* && -f $MMPROJ_PATH ) ]] || die "profile $PROFILE_NAME: multimodal projector not found or not absolute: $MMPROJ_PATH"; if [[ -n $DRAFT_MODEL_PATH || -n $DRAFT_GPU_LAYERS ]]; then [[ -n $DRAFT_MODEL_PATH && -n $SPEC_TYPE && $DRAFT_MODEL_PATH = /* && -f $DRAFT_MODEL_PATH ]] || die "profile $PROFILE_NAME: invalid external draft"; [[ -z $DRAFT_GPU_LAYERS ]] || is_uint "$DRAFT_GPU_LAYERS" || die "profile $PROFILE_NAME: DRAFT_GPU_LAYERS must be a non-negative integer"; fi; [[ $CONTAINER =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "profile $PROFILE_NAME: invalid CONTAINER"; is_uint "$CONTEXT_SIZE" && [[ $CONTEXT_SIZE -gt 0 ]] || die "profile $PROFILE_NAME: invalid CONTEXT_SIZE"; is_uint "$GPU_LAYERS" || die "profile $PROFILE_NAME: invalid GPU_LAYERS"; is_uint "$PARALLEL_SLOTS" && [[ $PARALLEL_SLOTS -gt 0 ]] || die "profile $PROFILE_NAME: invalid PARALLEL_SLOTS"; [[ -z $SPEC_TYPE || $SPEC_TYPE =~ ^[A-Za-z0-9_-]+$ ]] || die "profile $PROFILE_NAME: invalid SPEC_TYPE"; validate_optional_settings; is_host "$HOST" && is_uint "$PORT" && [[ $PORT -ge 1 && $PORT -le 65535 ]] || die "profile $PROFILE_NAME: invalid numeric, host, or port setting"; }
+# Optional settings remain absent from argv unless explicitly configured.
+validate_optional_settings() {
+  local key
+  [[ -z $SERVER_PATH || $SERVER_PATH == /* ]] ||
+    die "profile $PROFILE_NAME: SERVER_PATH must be absolute"
+  for key in BATCH_SIZE UBATCH_SIZE; do
+    [[ -z ${!key} ]] || { is_uint "${!key}" && [[ ${!key} -gt 0 ]]; } ||
+      die "profile $PROFILE_NAME: invalid $key"
+  done
+  for key in FLASH_ATTN LAZY_MODE JINJA REASONING REASONING_PRESERVE; do
+    [[ -z ${!key} || ${!key} == on || ${!key} == off ]] ||
+      die "profile $PROFILE_NAME: $key must be on or off"
+  done
+  for key in CACHE_TYPE_K CACHE_TYPE_V; do
+    [[ -z ${!key} ]] && continue
+    case ${!key} in
+      f32|f16|bf16|q8_0|q4_0|q4_1|iq4_nl|q5_0|q5_1) ;;
+      *) die "profile $PROFILE_NAME: unsupported $key" ;;
+    esac
+  done
+  [[ -z $RUNTIME_CONTAINER || $RUNTIME_CONTAINER =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
+    die "profile $PROFILE_NAME: invalid RUNTIME_CONTAINER"
+  if [[ -n $SPEC_DRAFT_ADAPTIVE || -n $SPEC_DRAFT_N_MIN ]]; then
+    [[ -n $SPEC_TYPE ]] || die "profile $PROFILE_NAME: draft options require SPEC_TYPE"
+  fi
+  [[ -z $SPEC_DRAFT_ADAPTIVE || $SPEC_DRAFT_ADAPTIVE == on || $SPEC_DRAFT_ADAPTIVE == off ]] ||
+    die "profile $PROFILE_NAME: SPEC_DRAFT_ADAPTIVE must be on or off"
+  if [[ -n $SPEC_DRAFT_N_MIN ]]; then
+    is_uint "$SPEC_DRAFT_N_MIN" && is_uint "$SPEC_DRAFT_N_MAX" ||
+      die "profile $PROFILE_NAME: draft bounds must be non-negative integers"
+    (( 10#$SPEC_DRAFT_N_MIN <= 10#$SPEC_DRAFT_N_MAX )) ||
+      die "profile $PROFILE_NAME: SPEC_DRAFT_N_MIN must not exceed SPEC_DRAFT_N_MAX"
+  fi
+  if [[ -n $SPEC_TYPE || -n $SPEC_DRAFT_N_MAX ]]; then
+    is_uint "$SPEC_DRAFT_N_MAX" || die "profile $PROFILE_NAME: invalid SPEC_DRAFT_N_MAX"
+  fi
+  if [[ -n $SPEC_DRAFT_P_MIN ]]; then
+    is_decimal_0_1 "$SPEC_DRAFT_P_MIN" || die "profile $PROFILE_NAME: invalid SPEC_DRAFT_P_MIN"
+  fi
+}
+runtime_container() {
+  if [[ -n ${RUNTIME_CONTAINER:-} ]]; then
+    printf '%s\n' "$RUNTIME_CONTAINER"
+  else
+    instance_container "$1"
+  fi
+}
+append_optional_args() {
+  [[ -z $FLASH_ATTN ]] || args+=(-fa "$FLASH_ATTN")
+  [[ -z $BATCH_SIZE ]] || args+=(-b "$BATCH_SIZE")
+  [[ -z $UBATCH_SIZE ]] || args+=(-ub "$UBATCH_SIZE")
+  [[ -z $CACHE_TYPE_K ]] || args+=(--cache-type-k "$CACHE_TYPE_K")
+  [[ -z $CACHE_TYPE_V ]] || args+=(--cache-type-v "$CACHE_TYPE_V")
+  [[ -z $LAZY_MODE ]] || args+=(--lazy-mode "$LAZY_MODE")
+  case $JINJA in on) args+=(--jinja);; off) args+=(--no-jinja);; esac
+  [[ -z $REASONING ]] || args+=(--reasoning "$REASONING")
+  case $REASONING_PRESERVE in
+    on) args+=(--reasoning-preserve);;
+    off) ;;
+  esac
+}
+validate_runtime(){ local instance=$1 container; container=$(runtime_container "$instance"); command -v distrobox >/dev/null 2>&1 || die "distrobox is not available"; distrobox list --no-color 2>/dev/null | awk -F '|' -v c="$container" 'function t(v){gsub(/^[[:space:]]+|[[:space:]]+$/, "",v);return v} {if(t($2)==c) found=1} END{exit !found}' || die "instance $instance: Distrobox container not found: $container"; }
 
 migrate_legacy(){ local target selected; target=$(selection_file worker); [[ -f $target || ! -f $LEGACY_SELECTION_FILE ]] && return; IFS= read -r selected < "$LEGACY_SELECTION_FILE" || return; [[ $selected =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "invalid saved selected profile"; mkdir -p "$(dirname "$target")"; umask 077; mv -- "$LEGACY_SELECTION_FILE" "$target"; }
 read_selection(){ local instance=$1 selected file; require_instance "$instance"; [[ $instance == worker ]] && migrate_legacy; file=$(selection_file "$instance"); [[ -f $file ]] || return 1; IFS= read -r selected < "$file" || return 1; [[ $selected =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "invalid saved selected profile for $instance"; printf '%s\n' "$selected"; }
 save_selection(){ local file; file=$(selection_file "$1"); mkdir -p "$(dirname "$file")"; umask 077; printf '%s\n' "$2" > "$file"; }
-service_active(){ systemctl --user is-active --quiet "$(service_name "$1")"; }
+service_active(){ systemctl --user is-active --quiet "$(service_name "$1")" >/dev/null; }
 api_url(){ printf 'http://127.0.0.1:%s/v1/models\n' "$(instance_port "$1")"; }
 ensure_port_available(){ local instance=$1 port listeners; port=$(instance_port "$instance"); command -v ss >/dev/null 2>&1 || die "ss is required to check whether port $port is available"; listeners=$(ss -ltnH "sport = :$port") || die "could not inspect port $port with ss"; if awk -v p="$port" '$4 ~ (":" p "$"){f=1} END{exit !f}' <<<"$listeners"; then die "port $port is already in use; stop the conflicting service or select a different instance"; fi; }
 api_is_ready(){ local instance=$1 response name; service_active "$instance" || return; response=$(curl --fail --silent --max-time 5 "$(api_url "$instance")" 2>/dev/null) || return; name=${MODEL_PATH##*/}; [[ $response == *"\"$MODEL_PATH\""* || $response == *"\"$name\""* ]] && service_active "$instance"; }
@@ -121,7 +182,7 @@ cmd_list() {
     fi
   done
 }
-collect_status(){ local instance=$1; STATUS_INSTANCE=$instance; STATUS_CONTAINER=$(instance_container "$instance"); STATUS_PROFILE=$(read_selection "$instance" || true); STATUS_SERVICE=$(systemctl --user is-active "$(service_name "$instance")" 2>/dev/null || true); STATUS_SERVICE=${STATUS_SERVICE:-unknown}; STATUS_API=not-applicable; STATUS_BACKEND= STATUS_MODEL= STATUS_DRAFT_MODEL= STATUS_MMPROJ= STATUS_CONTEXT_TOTAL= STATUS_PARALLEL_SLOTS= STATUS_CONTEXT_PER_SLOT= STATUS_HOST= STATUS_PID=; STATUS_PORT=$(instance_port "$instance"); STATUS_LISTEN= STATUS_HEALTH_ENDPOINT=$(api_url "$instance"); [[ -n $STATUS_PROFILE ]] || return; load_profile "$STATUS_PROFILE"; validate_loaded_profile; STATUS_API=not-ready; api_is_ready "$instance" && STATUS_API=ready; STATUS_BACKEND=$BACKEND; STATUS_MODEL=$MODEL_PATH; STATUS_DRAFT_MODEL=$DRAFT_MODEL_PATH; STATUS_MMPROJ=$MMPROJ_PATH; STATUS_CONTEXT_TOTAL=$CONTEXT_SIZE; STATUS_PARALLEL_SLOTS=$PARALLEL_SLOTS; STATUS_CONTEXT_PER_SLOT=$((CONTEXT_SIZE / PARALLEL_SLOTS)); STATUS_HOST=$HOST; STATUS_LISTEN=$HOST:$STATUS_PORT; STATUS_PID=$(systemctl --user show --property=MainPID --value "$(service_name "$instance")" 2>/dev/null || true); [[ $STATUS_PID =~ ^[1-9][0-9]*$ ]] || STATUS_PID=; }
+collect_status(){ local instance=$1; STATUS_INSTANCE=$instance; STATUS_CONTAINER=$(instance_container "$instance"); STATUS_PROFILE=$(read_selection "$instance" || true); STATUS_SERVICE=$(systemctl --user is-active "$(service_name "$instance")" 2>/dev/null || true); STATUS_SERVICE=${STATUS_SERVICE:-unknown}; STATUS_API=not-applicable; STATUS_BACKEND= STATUS_MODEL= STATUS_DRAFT_MODEL= STATUS_MMPROJ= STATUS_CONTEXT_TOTAL= STATUS_PARALLEL_SLOTS= STATUS_CONTEXT_PER_SLOT= STATUS_HOST= STATUS_PID=; STATUS_PORT=$(instance_port "$instance"); STATUS_LISTEN= STATUS_HEALTH_ENDPOINT=$(api_url "$instance"); [[ -n $STATUS_PROFILE ]] || return 0; load_profile "$STATUS_PROFILE"; validate_loaded_profile; STATUS_API=not-ready; api_is_ready "$instance" && STATUS_API=ready; STATUS_CONTAINER=$(runtime_container "$instance"); STATUS_BACKEND=$BACKEND; STATUS_MODEL=$MODEL_PATH; STATUS_DRAFT_MODEL=$DRAFT_MODEL_PATH; STATUS_MMPROJ=$MMPROJ_PATH; STATUS_CONTEXT_TOTAL=$CONTEXT_SIZE; STATUS_PARALLEL_SLOTS=$PARALLEL_SLOTS; STATUS_CONTEXT_PER_SLOT=$((CONTEXT_SIZE / PARALLEL_SLOTS)); STATUS_HOST=$HOST; STATUS_LISTEN=$HOST:$STATUS_PORT; STATUS_PID=$(systemctl --user show --property=MainPID --value "$(service_name "$instance")" 2>/dev/null || true); [[ $STATUS_PID =~ ^[1-9][0-9]*$ ]] || STATUS_PID=; }
 print_status(){ collect_status "$1"; printf 'Instance: %s\nProfile: %s\nService: %s\n' "$STATUS_INSTANCE" "${STATUS_PROFILE:-(none selected)}" "$STATUS_SERVICE"; [[ -n $STATUS_PROFILE ]] || { printf 'API: not applicable\nContainer: %s\n\n' "$STATUS_CONTAINER"; return; }; printf 'API: %s\nBackend: %s\nContainer: %s\nModel: %s\n' "$STATUS_API" "$STATUS_BACKEND" "$STATUS_CONTAINER" "$STATUS_MODEL"; [[ -n $STATUS_DRAFT_MODEL ]] && { local draft=${STATUS_DRAFT_MODEL##*/}; printf 'Draft model: %s\n' "$draft"; }; [[ -n $STATUS_MMPROJ ]] && { local mmproj=${STATUS_MMPROJ##*/}; printf 'MMProj: %s\n' "$mmproj"; }; printf 'Context: %s\nParallel slots: %s\nHost: %s\nPort: %s\nListen: %s\nHealth endpoint: %s\nPID: %s\n\n' "$STATUS_CONTEXT_TOTAL" "$STATUS_PARALLEL_SLOTS" "$STATUS_HOST" "$STATUS_PORT" "$STATUS_LISTEN" "$STATUS_HEALTH_ENDPOINT" "${STATUS_PID:--}"; }
 json_string(){ local value=$1 char escaped= i; for ((i=0; i<${#value}; i++)); do char=${value:i:1}; case $char in '"') escaped+='\\"';; '\\') escaped+='\\\\';; $'\b') escaped+='\\b';; $'\f') escaped+='\\f';; $'\n') escaped+='\\n';; $'\r') escaped+='\\r';; $'\t') escaped+='\\t';; *) escaped+=$char;; esac; done; printf '"%s"' "$escaped"; }
 json_value(){ [[ -n $1 ]] && json_string "$1" || printf 'null'; }
@@ -136,8 +197,8 @@ cmd_stop(){ [[ $# -le 1 ]] || die "usage: $PROGRAM stop [instance]"; local i=${1
 restart_selected(){ local i=$1 selected start; selected=$(read_selection "$i") || die "no profile is selected for $i; use: $PROGRAM start $i <profile>"; load_profile "$selected"; validate_loaded_profile; validate_runtime "$i"; service_active "$i" && systemctl --user stop "$(service_name "$i")"; ensure_port_available "$i"; start=$SECONDS; systemctl --user start "$(service_name "$i")" || die "failed to restart $i"; wait_for_api "$i" "$start"; }
 cmd_restart(){ [[ $# -le 1 ]] || die "usage: $PROGRAM restart [instance]"; local i=${1:-worker}; require_instance "$i"; with_lock "$i" restart_selected "$i"; }
 cmd_logs(){ local i=worker follow= arg; for arg in "$@"; do case $arg in worker|agent) [[ $i == worker && -z $follow ]] || die "usage: $PROGRAM logs [instance] [-f|--follow]"; i=$arg;; -f|--follow) [[ -z $follow ]] || die "usage: $PROGRAM logs [instance] [-f|--follow]"; follow=-f;; *) die "usage: $PROGRAM logs [instance] [-f|--follow]";; esac; done; if [[ -n $follow ]]; then journalctl --user -u "$(service_name "$i")" -f; else journalctl --user -u "$(service_name "$i")" --no-pager; fi; }
-cmd_run_selected(){ [[ $# -le 1 ]] || die "internal usage: $PROGRAM run-selected [instance]"; local i=${1:-worker} selected container; local -a args; require_instance "$i"; selected=$(read_selection "$i") || { note "No profile selected for $i; not starting llama-server."; return; }; load_profile "$selected"; validate_loaded_profile; validate_runtime "$i"; container=$(instance_container "$i"); args=(-m "$MODEL_PATH" -ngl "$GPU_LAYERS" -c "$CONTEXT_SIZE" -np "$PARALLEL_SLOTS"); [[ -n $MMPROJ_PATH ]] && args+=(--mmproj "$MMPROJ_PATH"); if [[ -n $SPEC_TYPE ]]; then args+=(--spec-type "$SPEC_TYPE"); [[ -n $DRAFT_MODEL_PATH ]] && args+=(--spec-draft-model "$DRAFT_MODEL_PATH" --spec-draft-ngl "$DRAFT_GPU_LAYERS"); args+=(--spec-draft-n-max "$SPEC_DRAFT_N_MAX" --spec-draft-p-min "$SPEC_DRAFT_P_MIN"); fi; args+=(--host "$HOST" --port "$(instance_port "$i")"); exec distrobox enter "$container" -- llama-server "${args[@]}"; }
+cmd_run_selected(){ [[ $# -le 1 ]] || die "internal usage: $PROGRAM run-selected [instance]"; local i=${1:-worker} selected container; local -a args; require_instance "$i"; selected=$(read_selection "$i") || { note "No profile selected for $i; not starting llama-server."; return; }; load_profile "$selected"; validate_loaded_profile; validate_runtime "$i"; container=$(runtime_container "$i"); args=(-m "$MODEL_PATH" -ngl "$GPU_LAYERS" -c "$CONTEXT_SIZE" -np "$PARALLEL_SLOTS"); [[ -n $MMPROJ_PATH ]] && args+=(--mmproj "$MMPROJ_PATH"); if [[ -n $SPEC_TYPE ]]; then args+=(--spec-type "$SPEC_TYPE"); [[ -n $DRAFT_MODEL_PATH ]] && args+=(--spec-draft-model "$DRAFT_MODEL_PATH"); [[ -z $DRAFT_GPU_LAYERS ]] || args+=(--spec-draft-ngl "$DRAFT_GPU_LAYERS"); [[ $SPEC_DRAFT_ADAPTIVE != on ]] || args+=(--spec-draft-adaptive); [[ -z $SPEC_DRAFT_N_MIN ]] || args+=(--spec-draft-n-min "$SPEC_DRAFT_N_MIN"); args+=(--spec-draft-n-max "$SPEC_DRAFT_N_MAX"); [[ -z $SPEC_DRAFT_P_MIN ]] || args+=(--spec-draft-p-min "$SPEC_DRAFT_P_MIN"); fi; append_optional_args; args+=(--host "$HOST" --port "$(instance_port "$i")"); exec distrobox enter "$container" -- "${SERVER_PATH:-llama-server}" "${args[@]}"; }
 cmd_validate(){ [[ $# == 1 ]] || die "usage: $PROGRAM --validate-profile <profile>"; load_profile "$1"; validate_loaded_profile; note "Valid profile: $PROFILE_NAME"; }
-cmd_validate_runtime(){ local instance profile; if [[ $# == 1 ]]; then instance=worker; profile=$1; elif [[ $# == 2 ]]; then instance=$1; profile=$2; require_instance "$instance"; else die "usage: $PROGRAM --validate-runtime [instance] <profile>"; fi; load_profile "$profile"; validate_loaded_profile; validate_runtime "$instance"; note "Runtime available for $instance: $(instance_container "$instance")"; }
+cmd_validate_runtime(){ local instance profile; if [[ $# == 1 ]]; then instance=worker; profile=$1; elif [[ $# == 2 ]]; then instance=$1; profile=$2; require_instance "$instance"; else die "usage: $PROGRAM --validate-runtime [instance] <profile>"; fi; load_profile "$profile"; validate_loaded_profile; validate_runtime "$instance"; note "Runtime available for $instance: $(runtime_container "$instance")"; }
 cmd_check_port(){ local i profile; if [[ $# == 1 ]]; then i=worker; profile=$1; elif [[ $# == 2 ]]; then i=$1; profile=$2; require_instance "$i"; else die "usage: $PROGRAM --check-port [instance] <profile>"; fi; load_profile "$profile"; validate_loaded_profile; ensure_port_available "$i"; note "Port available for $i: $(instance_port "$i")"; }
 case ${1:-help} in list) shift; (($#==0)) || die "usage: $PROGRAM list"; cmd_list;; status) shift; cmd_status "$@";; start) shift; cmd_start "$@";; stop) shift; cmd_stop "$@";; restart) shift; cmd_restart "$@";; logs) shift; cmd_logs "$@";; --validate-profile) shift; cmd_validate "$@";; --validate-runtime) shift; cmd_validate_runtime "$@";; --check-port) shift; cmd_check_port "$@";; run-selected) shift; cmd_run_selected "$@";; help|--help|-h) usage;; *) die "unknown command: $1 (try: $PROGRAM help)";; esac

@@ -35,6 +35,9 @@ proceso iniciado esté listo. Para las instancias soportadas el runtime efectivo
 lo determina la instancia, no `CONTAINER` del perfil: `worker` entra en
 `llama-vulkan-worker` y `agent` en `llama-vulkan-radv`. `CONTAINER` permanece
 en los perfiles como metadata compatible; `BACKEND` también es descriptivo.
+La clave opcional `RUNTIME_CONTAINER` sustituye ese contenedor para un perfil,
+tanto en la ejecución como en la validación y el estado. Por ejemplo,
+`evo-model start agent qwen38-flash` usa `llama-vulkan-test` en el puerto 8081.
 
 Los perfiles soportan tanto MTP integrado como un draft model externo. Un
 perfil sin `DRAFT_MODEL_PATH` conserva el comportamiento de MTP integrado; si

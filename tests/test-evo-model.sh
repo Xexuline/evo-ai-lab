@@ -40,12 +40,16 @@ run_manager() { EVO_MODEL_PROFILE_DIR="$PROFILE_DIR" EVO_MODEL_STATE_DIR="$STATE
 
 run_manager --validate-profile good >/dev/null
 
-# The deployed qwen38 profile has no external draft; both repository profiles
-# validate against the real GGUF files without contacting systemd.
+# Validate every repository profile using fixture GGUF paths, so the suite
+# does not depend on models installed on the developer's machine.
 for repository_profile in "$ROOT_DIR"/config/models/*.conf; do
   profile_name=${repository_profile##*/}
   profile_name=${profile_name%.conf}
-  EVO_MODEL_PROFILE_DIR="$ROOT_DIR/config/models" EVO_MODEL_STATE_DIR="$STATE_DIR" "$ROOT_DIR/scripts/evo-model" --validate-profile "$profile_name" >/dev/null
+  sed -e "s|^MODEL_PATH=.*|MODEL_PATH=$MODEL_FILE|" \
+      -e "s|^DRAFT_MODEL_PATH=.*|DRAFT_MODEL_PATH=$DRAFT_FILE|" \
+      -e "s|^MMPROJ_PATH=.*|MMPROJ_PATH=$MMPROJ_FILE|" \
+      "$repository_profile" > "$PROFILE_DIR/$profile_name.conf"
+  run_manager --validate-profile "$profile_name" >/dev/null
 done
 
 write_profile external-draft <<'EOF'
@@ -236,6 +240,7 @@ if [[ "$1" == "list" ]]; then
 ID | NAME | STATUS | IMAGE
 abc123 | llama-vulkan-radv | Up | example/radv
 abc124 | llama-vulkan-worker | Up | example/worker
+abc125 | llama-vulkan-test | Up | example/test
 def456 | llama-vulkan | Up | example/vulkan
 TABLE
 elif [[ "$1" == "enter" ]]; then
@@ -293,6 +298,144 @@ $DRAFT_FILE
 8080
 EOF
 diff -u "$TEMP_DIR/expected-draft-args" "$TEMP_DIR/draft-args"
+
+# Flash uses its experimental runtime and exactly the requested server flags.
+sed -e "s|^MODEL_PATH=.*|MODEL_PATH=$MODEL_FILE|" -e "s|^DRAFT_MODEL_PATH=.*|DRAFT_MODEL_PATH=$DRAFT_FILE|" "$ROOT_DIR/config/models/qwen38-flash.conf" > "$PROFILE_DIR/qwen38-flash.conf"
+run_manager --validate-profile qwen38-flash >/dev/null
+mkdir -p "$STATE_DIR/agent"
+printf 'qwen38-flash\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/flash-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+python3 - "$TEMP_DIR/flash-args" "$MODEL_FILE" "$DRAFT_FILE" <<'PYTEST'
+import sys
+from pathlib import Path
+assert Path(sys.argv[1]).read_text().splitlines() == [
+    "enter", "llama-vulkan-test", "--", "/home/evo/strix-llama.cpp/build/bin/llama-server",
+    "-m", sys.argv[2], "-ngl", "99", "-c", "131072", "-np", "1",
+    "--spec-type", "draft-mtp", "--spec-draft-model", sys.argv[3],
+    "--spec-draft-n-max", "2",
+    "-fa", "on", "-b", "2048", "-ub", "512",
+    "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
+    "--lazy-mode", "off", "--jinja", "--reasoning", "on",
+    "--reasoning-preserve", "--host", "0.0.0.0", "--port", "8081",
+]
+PYTEST
+PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime agent qwen38-flash | grep -Fxq 'Runtime available for agent: llama-vulkan-test'
+for setting in FLASH_ATTN=invalid BATCH_SIZE=0 UBATCH_SIZE=-1 CACHE_TYPE_K=invalid CACHE_TYPE_V=invalid LAZY_MODE=invalid JINJA=invalid REASONING=invalid REASONING_PRESERVE=invalid RUNTIME_CONTAINER=/invalid SERVER_PATH=relative/path SPEC_DRAFT_ADAPTIVE=invalid SPEC_DRAFT_N_MIN=-1 SPEC_DRAFT_N_MIN=4 SPEC_DRAFT_N_MIN=1.5; do
+  sed -e 's/^PROFILE_NAME=.*/PROFILE_NAME=bad-flash/' -e "/^${setting%%=*}=/d" "$PROFILE_DIR/qwen38-flash.conf" > "$PROFILE_DIR/bad-flash.conf"
+  printf '%s\n' "$setting" >> "$PROFILE_DIR/bad-flash.conf"
+  if run_manager --validate-profile bad-flash >/dev/null 2>&1; then
+    echo "expected invalid setting to fail: $setting" >&2
+    exit 1
+  fi
+done
+sed -e 's/^PROFILE_NAME=.*/PROFILE_NAME=missing-runtime/' -e 's/^RUNTIME_CONTAINER=.*/RUNTIME_CONTAINER=missing-container/' "$PROFILE_DIR/qwen38-flash.conf" > "$PROFILE_DIR/missing-runtime.conf"
+if PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime agent missing-runtime >/dev/null 2>&1; then
+  echo "expected missing runtime container to fail" >&2
+  exit 1
+fi
+# Adaptive decoding remains available independently of the Flash defaults.
+sed 's/^PROFILE_NAME=.*/PROFILE_NAME=adaptive/' "$PROFILE_DIR/qwen38-flash.conf" > "$PROFILE_DIR/adaptive.conf"
+printf 'SPEC_DRAFT_ADAPTIVE=on\nSPEC_DRAFT_N_MIN=2\n' >> "$PROFILE_DIR/adaptive.conf"
+printf 'adaptive\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/adaptive-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+python3 - "$TEMP_DIR/adaptive-args" <<'PYTEST'
+import sys
+from pathlib import Path
+args = Path(sys.argv[1]).read_text().splitlines()
+assert "--spec-draft-adaptive" in args
+assert args[args.index("--spec-draft-n-min") + 1] == "2"
+PYTEST
+sed -e 's/^PROFILE_NAME=.*/PROFILE_NAME=orphan-ngl/' -e '/^DRAFT_MODEL_PATH=/d' "$PROFILE_DIR/external-draft.conf" > "$PROFILE_DIR/orphan-ngl.conf"
+if run_manager --validate-profile orphan-ngl >/dev/null 2>&1; then
+  echo "expected draft GPU layers without a draft model to fail" >&2
+  exit 1
+fi
+# Optional flags can be disabled explicitly; paths remain a single argument
+# even with spaces and shell metacharacters (profiles are data, never shell).
+python3 - "$PROFILE_DIR" "$TEMP_DIR" <<'PYTEST'
+from pathlib import Path
+import sys
+profiles = Path(sys.argv[1])
+s = (profiles / "qwen38-flash.conf").read_text()
+s = s.replace("PROFILE_NAME=qwen38-flash", "PROFILE_NAME=flash-off")
+s += "SPEC_DRAFT_ADAPTIVE=off\n"
+for key in ("FLASH_ATTN", "JINJA", "REASONING", "REASONING_PRESERVE", "SPEC_DRAFT_ADAPTIVE"):
+    s = s.replace(key + "=on", key + "=off")
+s = s.replace("LAZY_MODE=off", "LAZY_MODE=on")
+s = s.replace("SERVER_PATH=/home/evo/strix-llama.cpp/build/bin/llama-server",
+              "SERVER_PATH=" + sys.argv[2] + "/custom build/$(touch injected)")
+(profiles / "flash-off.conf").write_text(s)
+PYTEST
+printf 'flash-off\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/off-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+python3 - "$TEMP_DIR/off-args" "$TEMP_DIR" <<'PYTEST'
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_text().splitlines()
+assert args[3] == sys.argv[2] + "/custom build/$(touch injected)"
+for flag, value in (("-fa", "off"), ("--reasoning", "off"), ("--lazy-mode", "on")):
+    assert args[args.index(flag) + 1] == value
+assert "--spec-draft-adaptive" not in args
+assert "--no-jinja" in args
+assert "--jinja" not in args
+assert "--reasoning-preserve" not in args
+PYTEST
+
+# Removing all new options restores the default executable and instance
+# container, with no speculative flags or unused draft settings required.
+sed -e 's/^PROFILE_NAME=.*/PROFILE_NAME=minimal/' \
+    -e '/^\(SPEC_\|DRAFT_\)/d' \
+    -e '/^\(FLASH_ATTN\|BATCH_SIZE\|UBATCH_SIZE\|CACHE_TYPE_K\|CACHE_TYPE_V\|LAZY_MODE\|JINJA\|REASONING\|REASONING_PRESERVE\|RUNTIME_CONTAINER\|SERVER_PATH\)=/d' \
+    "$PROFILE_DIR/qwen38-flash.conf" > "$PROFILE_DIR/minimal.conf"
+printf 'minimal\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/minimal-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+python3 - "$TEMP_DIR/minimal-args" "$MODEL_FILE" <<'PYTEST'
+from pathlib import Path
+import sys
+assert Path(sys.argv[1]).read_text().splitlines() == [
+    "enter", "llama-vulkan-radv", "--", "llama-server", "-m", sys.argv[2],
+    "-ngl", "99", "-c", "131072", "-np", "1",
+    "--host", "0.0.0.0", "--port", "8081",
+]
+PYTEST
+
+# N_MAX remains mandatory with SPEC_TYPE; P_MIN may use the runtime default.
+# Both are validated whenever supplied.
+for key in SPEC_DRAFT_N_MAX SPEC_DRAFT_P_MIN; do
+  sed -e 's/^PROFILE_NAME=.*/PROFILE_NAME=missing-spec-setting/' \
+      -e "/^$key=/d" "$PROFILE_DIR/good.conf" > "$PROFILE_DIR/missing-spec-setting.conf"
+  if [[ $key == SPEC_DRAFT_P_MIN ]]; then
+    run_manager --validate-profile missing-spec-setting >/dev/null
+  elif run_manager --validate-profile missing-spec-setting >/dev/null 2>&1; then
+    echo "expected missing $key with SPEC_TYPE to fail" >&2
+    exit 1
+  fi
+  sed 's/^PROFILE_NAME=.*/PROFILE_NAME=invalid-spec-setting/' "$PROFILE_DIR/minimal.conf" > "$PROFILE_DIR/invalid-spec-setting.conf"
+  printf '%s=invalid\n' "$key" >> "$PROFILE_DIR/invalid-spec-setting.conf"
+  if run_manager --validate-profile invalid-spec-setting >/dev/null 2>&1; then
+    echo "expected invalid $key without SPEC_TYPE to fail" >&2
+    exit 1
+  fi
+done
+
+# New draft controls require speculative decoding rather than being ignored.
+for setting in SPEC_DRAFT_ADAPTIVE=on SPEC_DRAFT_N_MIN=2; do
+  sed 's/^PROFILE_NAME=.*/PROFILE_NAME=orphan-draft/' "$PROFILE_DIR/minimal.conf" > "$PROFILE_DIR/orphan-draft.conf"
+  printf '%s\n' "$setting" >> "$PROFILE_DIR/orphan-draft.conf"
+  if run_manager --validate-profile orphan-draft >/dev/null 2>&1; then
+    echo "expected draft option without SPEC_TYPE to fail: $setting" >&2
+    exit 1
+  fi
+done
+
+# Duplicate optional keys must fail instead of silently overriding values.
+sed 's/^PROFILE_NAME=.*/PROFILE_NAME=duplicate-server/' "$PROFILE_DIR/qwen38-flash.conf" > "$PROFILE_DIR/duplicate-server.conf"
+printf 'SERVER_PATH=/another/server\n' >> "$PROFILE_DIR/duplicate-server.conf"
+if run_manager --validate-profile duplicate-server >/dev/null 2>&1; then
+  echo "expected duplicate SERVER_PATH to fail" >&2
+  exit 1
+fi
+rm "$STATE_DIR/agent/selected-profile"
 
 cat > "$FAKE_BIN/ss" <<'EOF'
 #!/usr/bin/env bash
@@ -360,6 +503,17 @@ EOF
 chmod +x "$FAKE_BIN/systemctl" "$FAKE_BIN/curl"
 mkdir -p "$STATE_DIR"
 printf 'good\n' > "$STATE_DIR/worker/selected-profile"
+printf 'qwen38-flash\n' > "$STATE_DIR/agent/selected-profile"
+PATH="$FAKE_BIN:$PATH" run_manager status --json > "$TEMP_DIR/flash-status.json"
+python3 - "$TEMP_DIR/flash-status.json" <<'PYTEST'
+import json, sys
+with open(sys.argv[1]) as f:
+    instances = json.load(f)["instances"]
+assert instances["agent"]["container"] == "llama-vulkan-test"
+assert instances["worker"]["container"] == "llama-vulkan-worker"
+assert instances["agent"]["port"] == 8081
+PYTEST
+rm "$STATE_DIR/agent/selected-profile"
 status_output=$(PATH="$FAKE_BIN:$PATH" run_manager status)
 [[ "$status_output" == *"API: ready"* ]]
 [[ "$status_output" == *"Listen: 127.0.0.1:8080"* ]]

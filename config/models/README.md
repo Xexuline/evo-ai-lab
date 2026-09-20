@@ -8,25 +8,39 @@ claves siguientes y rechaza claves repetidas, desconocidas o incompletas:
 PROFILE_NAME       # debe coincidir con el nombre del archivo
 MODEL_PATH         # ruta absoluta al GGUF
 BACKEND            # metadata descriptiva; no selecciona el runtime
-CONTAINER          # nombre de la toolbox Distrobox que determina el runtime
+CONTAINER          # metadata descriptiva
+RUNTIME_CONTAINER  # opcional; sustituye el contenedor de la instancia
+SERVER_PATH        # opcional; ruta absoluta del ejecutable dentro del contenedor
 CONTEXT_SIZE
 GPU_LAYERS
 PARALLEL_SLOTS
 SPEC_TYPE          # opcional; se omite el flag si no hay speculative decoding
 DRAFT_MODEL_PATH   # opcional; GGUF draft externo, ruta absoluta
-DRAFT_GPU_LAYERS   # obligatorio junto con DRAFT_MODEL_PATH
+DRAFT_GPU_LAYERS   # opcional; requiere DRAFT_MODEL_PATH
 MMPROJ_PATH        # opcional; proyector multimodal, ruta absoluta
-SPEC_DRAFT_N_MAX
-SPEC_DRAFT_P_MIN
+SPEC_DRAFT_ADAPTIVE # opcional; on añade --spec-draft-adaptive; off lo omite
+SPEC_DRAFT_N_MIN    # opcional; entero no negativo, no mayor que N_MAX
+SPEC_DRAFT_N_MAX   # obligatorio solo con SPEC_TYPE
+SPEC_DRAFT_P_MIN   # opcional; si se omite, usa el valor del runtime
+FLASH_ATTN         # opcional; on/off → -fa
+BATCH_SIZE         # opcional; entero positivo → -b
+UBATCH_SIZE        # opcional; entero positivo → -ub
+CACHE_TYPE_K       # opcional → --cache-type-k
+CACHE_TYPE_V       # opcional → --cache-type-v
+LAZY_MODE          # opcional; on/off → --lazy-mode
+JINJA              # opcional; on/off → --jinja/--no-jinja
+REASONING          # opcional; on/off → --reasoning
+REASONING_PRESERVE # opcional; on añade --reasoning-preserve; off lo omite
 HOST
 PORT
 ```
 
 El perfil se valida antes de iniciar: valores numéricos, host y puerto, ruta de
-modelo y las claves obligatorias. `CONTAINER` se comprueba además durante
+modelo y las claves obligatorias. El contenedor efectivo se comprueba además durante
 `evo-model start` y `restart` mediante `distrobox list`. Si se define
-`DRAFT_MODEL_PATH`, debe ser una ruta absoluta a un GGUF existente y debe ir
-acompañado de `DRAFT_GPU_LAYERS`, un entero no negativo.
+`DRAFT_MODEL_PATH`, debe ser una ruta absoluta a un GGUF existente y puede ir
+acompañado de `DRAFT_GPU_LAYERS`, un entero no negativo. Si se omite, no se
+pasa `--spec-draft-ngl`. `DRAFT_MODEL_PATH` usa `--spec-draft-model`, alias de `-md`.
 `MMPROJ_PATH`, cuando existe, también debe ser una ruta absoluta a un GGUF
 existente y se pasa como `--mmproj`.
 
@@ -34,9 +48,14 @@ No incluir GGUF, tokens, credenciales ni argumentos arbitrarios de shell en
 estos ficheros. Para añadir un flag soportado de llama.cpp se amplía de forma
 explícita el esquema y la construcción de argumentos en `scripts/evo-model`.
 
-Por ejemplo, `BACKEND=RADV/Vulkan` junto con
-`CONTAINER=llama-vulkan-radv` documenta la elección. Cambiar solamente
-`BACKEND` no cambia qué toolbox ni backend se ejecuta.
+Por defecto, `worker` usa `llama-vulkan-worker` y `agent` usa
+`llama-vulkan-radv`. `RUNTIME_CONTAINER` permite elegir otro contenedor.
+`CONTAINER` y `BACKEND` son metadata descriptiva. El puerto efectivo es el de
+la instancia: worker 8080, agent 8081.
+
+Las claves nuevas no añaden argumentos si están ausentes. Los tipos de caché
+admitidos son `f32`, `f16`, `bf16`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`
+y `q5_1`. La build debe soportar los flags y tipos seleccionados.
 
 `qwen38-q4.conf` es el perfil inicial desplegado de EVO-X3: reproduce Qwen3.8
 Q4_K_L con RADV/Vulkan, MTP, contexto 65 536 y escucha en `0.0.0.0:8080`.
@@ -59,6 +78,7 @@ rendimiento ni un benchmark.
 | `qwen36-mtp` | Qwen3.6 35B-A3B Q8_0 | 65536 | Draft MTP externo | Sí |
 | `qwen36-abliterated-vl` | Qwen3.6 Heretic Q8_0 | 32768 | No | Sí |
 | `qwen35-q8-vl` | Qwen3.5 35B-A3B Q8_0 | 32768 | No | Sí |
+| `qwen35-9b-mtp-q4` | Qwen3.5 9B MTP Q4_K_M | 98304 | MTP integrado | No |
 | `qwen38-abliterated-mtp-vl` | Qwen3.8 Aggressive Q8_K_P | 32768 | MTP integrado | Sí |
 | `gpt-oss-120b` | GPT-OSS 120B MXFP4 | 16384 | No | No |
 | `coder-next-q5` | Qwen Coder Next Q5_K_M | 32768 | No | No |
@@ -71,11 +91,31 @@ completo a partir de ese primer archivo, por lo que no se crean perfiles por
 shard. Los `mmproj` y drafts tampoco son perfiles independientes; se asocian
 solo cuando la relación es clara.
 
-Qwen3.8 Flash no forma parte del catálogo estable. Su conjunto de tres shards
-(UD-IQ4_XS) ya está completo, incluido `00002`, pero se está probando con una
-build experimental/específica de llama.cpp (`llama-vulkan-test`) y todavía no se
-integra en `evo-model`. Esperamos a disponer de un runtime suficientemente
-estable, especialmente con soporte MTP funcional.
+`qwen35-9b-mtp-q4` usa 2 slots, 99 capas GPU, Flash Attention, cachés
+`q8_0`, Jinja, reasoning y `draft-mtp` con máximo 3 tokens, sin draft externo.
+Selecciona el binario `/home/evo/strix-llama.cpp/build/bin/llama-server`
+dentro del contenedor Distrobox `llama-vulkan-worker`.
+Su `PORT=8082` conserva el comando original, pero el gestor lo sustituye por
+8080 en `worker` o 8081 en `agent`; no reproduce la escucha original en 8082.
+La validación del perfil no comprueba la compatibilidad de la build ni el
+arranque del modelo.
+
+Qwen3.8 Flash tiene el perfil experimental `qwen38-flash`, con el primer
+shard UD-IQ4_XS, contexto 131072, caché Q8_0 y MTP externo con
+`mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf` y máximo 2 tokens draft. No activa
+draft adaptativo ni fija mínimo, p-min o capas GPU del draft. Las claves SPEC_DRAFT_ADAPTIVE y SPEC_DRAFT_N_MIN requieren SPEC_TYPE.
+Usa `RUNTIME_CONTAINER=llama-vulkan-test` y
+`SERVER_PATH=/home/evo/strix-llama.cpp/build/bin/llama-server` para seleccionar
+su build específica. Sin `SERVER_PATH`, se ejecuta `llama-server` desde el
+PATH del contenedor.
+Tras actualizar la instalación con `./install.sh`, se lanza en el puerto 8081:
+
+```bash
+evo-model start agent qwen38-flash
+```
+
+El soporte del gestor está implementado; la compatibilidad y estabilidad de
+esa build experimental deben comprobarse al ejecutarla.
 
 El sidecar Eagle3 de GPT-OSS y el FastMTP de la variante Qwen3.8 Aggressive no
 se activan: su configuración/runtime compatible no está confirmada para esta
