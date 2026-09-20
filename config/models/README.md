@@ -78,6 +78,7 @@ rendimiento ni un benchmark.
 | `qwen36-mtp` | Qwen3.6 35B-A3B Q8_0 | 65536 | Draft MTP externo | Sí |
 | `qwen36-abliterated-vl` | Qwen3.6 Heretic Q8_0 | 32768 | No | Sí |
 | `qwen35-q8-vl` | Qwen3.5 35B-A3B Q8_0 | 32768 | No | Sí |
+| `qwen35-9b-mtp-q4` | Qwen3.5 9B MTP Q4_K_M | 98304 | MTP integrado | No |
 | `qwen38-abliterated-mtp-vl` | Qwen3.8 Aggressive Q8_K_P | 32768 | MTP integrado | Sí |
 | `gpt-oss-120b` | GPT-OSS 120B MXFP4 | 16384 | No | No |
 | `coder-next-q5` | Qwen Coder Next Q5_K_M | 32768 | No | No |
@@ -89,6 +90,15 @@ rendimiento ni un benchmark.
 completo a partir de ese primer archivo, por lo que no se crean perfiles por
 shard. Los `mmproj` y drafts tampoco son perfiles independientes; se asocian
 solo cuando la relación es clara.
+
+`qwen35-9b-mtp-q4` usa 2 slots, 99 capas GPU, Flash Attention, cachés
+`q8_0`, Jinja, reasoning y `draft-mtp` con máximo 3 tokens, sin draft externo.
+Selecciona el binario `/home/evo/strix-llama.cpp/build/bin/llama-server`
+dentro del contenedor Distrobox `llama-vulkan-worker`.
+Su `PORT=8082` conserva el comando original, pero el gestor lo sustituye por
+8080 en `worker` o 8081 en `agent`; no reproduce la escucha original en 8082.
+La validación del perfil no comprueba la compatibilidad de la build ni el
+arranque del modelo.
 
 Qwen3.8 Flash tiene el perfil experimental `qwen38-flash`, con el primer
 shard UD-IQ4_XS, contexto 131072, caché Q8_0 y MTP externo con
