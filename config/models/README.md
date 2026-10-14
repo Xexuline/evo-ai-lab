@@ -11,6 +11,7 @@ BACKEND            # metadata descriptiva; no selecciona el runtime
 CONTAINER          # metadata descriptiva
 RUNTIME_CONTAINER  # opcional; sustituye el contenedor de la instancia
 SERVER_PATH        # opcional; ruta absoluta del ejecutable dentro del contenedor
+HIP_LAUNCH_BLOCKING # opcional; 0/1 → variable de entorno del servidor
 CONTEXT_SIZE
 GPU_LAYERS
 PARALLEL_SLOTS
@@ -47,6 +48,12 @@ existente y se pasa como `--mmproj`.
 No incluir GGUF, tokens, credenciales ni argumentos arbitrarios de shell en
 estos ficheros. Para añadir un flag soportado de llama.cpp se amplía de forma
 explícita el esquema y la construcción de argumentos en `scripts/evo-model`.
+
+Para pasar `HIP_LAUNCH_BLOCKING` al servidor, añadir `HIP_LAUNCH_BLOCKING=1`
+al perfil correspondiente (`0` también es válido). El gestor la pasa mediante
+`env` dentro del contenedor, antes del ejecutable. Si se omite, no añade ninguna
+asignación de esta variable al comando. No es un flag de llama.cpp ni selecciona
+el backend; la build y el contenedor deben ser compatibles con HIP.
 
 Por defecto, `worker` usa `llama-vulkan-worker` y `agent` usa
 `llama-vulkan-radv`. `RUNTIME_CONTAINER` permite elegir otro contenedor.

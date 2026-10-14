@@ -300,7 +300,12 @@ EOF
 diff -u "$TEMP_DIR/expected-draft-args" "$TEMP_DIR/draft-args"
 
 # Flash uses its experimental runtime and exactly the requested server flags.
+# Normalize tunable settings so local profile changes do not invalidate this fixture.
 sed -e "s|^MODEL_PATH=.*|MODEL_PATH=$MODEL_FILE|" -e "s|^DRAFT_MODEL_PATH=.*|DRAFT_MODEL_PATH=$DRAFT_FILE|" "$ROOT_DIR/config/models/qwen38-flash.conf" > "$PROFILE_DIR/qwen38-flash.conf"
+sed -i -e 's/^CONTEXT_SIZE=.*/CONTEXT_SIZE=131072/' \
+    -e 's/^PARALLEL_SLOTS=.*/PARALLEL_SLOTS=1/' \
+    -e 's/^SPEC_DRAFT_N_MAX=.*/SPEC_DRAFT_N_MAX=2/' \
+    "$PROFILE_DIR/qwen38-flash.conf"
 run_manager --validate-profile qwen38-flash >/dev/null
 mkdir -p "$STATE_DIR/agent"
 printf 'qwen38-flash\n' > "$STATE_DIR/agent/selected-profile"
@@ -398,6 +403,38 @@ assert Path(sys.argv[1]).read_text().splitlines() == [
     "--host", "0.0.0.0", "--port", "8081",
 ]
 PYTEST
+
+# HIP settings are opt-in and reach the server inside the container.
+for value in 0 1; do
+  sed 's/^PROFILE_NAME=.*/PROFILE_NAME=hip/' "$PROFILE_DIR/minimal.conf" > "$PROFILE_DIR/hip.conf"
+  printf 'HIP_LAUNCH_BLOCKING=%s\n' "$value" >> "$PROFILE_DIR/hip.conf"
+  printf 'hip\n' > "$STATE_DIR/agent/selected-profile"
+  EVO_MODEL_TEST_ARGS="$TEMP_DIR/hip-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+  python3 - "$TEMP_DIR/hip-args" "$TEMP_DIR/minimal-args" "$value" <<'PYTEST'
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_text().splitlines()
+original = Path(sys.argv[2]).read_text().splitlines()
+assert args == original[:3] + ["env", "HIP_LAUNCH_BLOCKING=" + sys.argv[3]] + original[3:]
+PYTEST
+done
+for value in '' 2 -1 on '1;touch injected'; do
+  sed 's/^PROFILE_NAME=.*/PROFILE_NAME=bad-hip/' "$PROFILE_DIR/minimal.conf" > "$PROFILE_DIR/bad-hip.conf"
+  printf 'HIP_LAUNCH_BLOCKING=%s\n' "$value" >> "$PROFILE_DIR/bad-hip.conf"
+  if run_manager --validate-profile bad-hip >/dev/null 2>&1; then
+    echo "expected invalid HIP_LAUNCH_BLOCKING to fail: $value" >&2
+    exit 1
+  fi
+done
+printf 'HIP_LAUNCH_BLOCKING=0\n' >> "$PROFILE_DIR/hip.conf"
+if run_manager --validate-profile hip >/dev/null 2>&1; then
+  echo "expected duplicate HIP_LAUNCH_BLOCKING to fail" >&2
+  exit 1
+fi
+# Selecting a profile without the key restores the original command.
+printf 'minimal\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/after-hip-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+diff -u "$TEMP_DIR/minimal-args" "$TEMP_DIR/after-hip-args"
 
 # N_MAX remains mandatory with SPEC_TYPE; P_MIN may use the runtime default.
 # Both are validated whenever supplied.
