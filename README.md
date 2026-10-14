@@ -8,9 +8,9 @@ Documentación y configuración reproducible del laboratorio local de IA. El nod
 - Sistema observado: Ubuntu 24.04.4 LTS, kernel `7.0.0-30-generic`.
 - Memoria Linux visible: ~124 GiB, con 1 GiB de VRAM fija y GTT dinámico de ~124 GiB.
 - Runtime recomendado provisionalmente: `llama-vulkan-radv` en Distrobox.
-- `evo-model` puede gestionar dos instancias locales simultáneas: `worker` en 8080 y `agent` en 8081.
+- `evo-model` gestiona instancias locales de llama.cpp y [Gufo](docs/gufo.md): `worker`, `agent` o nombres de perfil; cada perfil define su `PORT`.
 
-Cada instancia expone una API compatible con OpenAI en `http://<EVO_IP>:8080/v1` o `:8081/v1` dentro de la LAN. No debe exponerse directamente a Internet.
+Cada instancia expone una API compatible con OpenAI en `http://<EVO_IP>:<PORT>/v1` dentro de la LAN. No debe exponerse directamente a Internet.
 
 ## Guía de lectura
 
@@ -25,10 +25,10 @@ El perfil gestionado desplegado es [`qwen38-q4`](config/models/qwen38-q4.conf), 
 ## Model manager v1 (implementado y desplegado)
 
 [`evo-model`](tools/model-manager/README.md) está desplegado en el EVO-X3 para
-seleccionar, cargar, detener y revisar un único modelo. El perfil inicial es
-`qwen38-q4`, ejecutado con `llama-vulkan-radv` (RADV/Vulkan). Las capacidades
-de múltiples modelos, control remoto, N150, LiteLLM, evo-top y descargas siguen
-fuera de v1.
+seleccionar, cargar, detener y revisar un modelo por instancia. El perfil inicial es
+`qwen38-q4`, ejecutado con `llama-vulkan-radv` (RADV/Vulkan). La integración de Gufo y las instancias por perfil se describen en
+[la guía Gufo](docs/gufo.md); el despliegue de esta actualización requiere
+ejecutar `./install.sh`.
 
 El catálogo de perfiles del repositorio cubre los GGUF inspeccionados en el
 EVO-X3, incluidos modelos multimodales y Qwen Coder sharded; consultar

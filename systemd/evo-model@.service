@@ -5,9 +5,11 @@ After=default.target
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/evo-model run-selected %i
+ExecStopPost=%h/.local/bin/evo-model cleanup-runtime %i
+KillMode=control-group
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=30
+TimeoutStopSec=45
 
 [Install]
 WantedBy=default.target
