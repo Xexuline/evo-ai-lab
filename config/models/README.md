@@ -7,10 +7,11 @@ claves siguientes y rechaza claves repetidas, desconocidas o incompletas:
 ```text
 PROFILE_NAME       # debe coincidir con el nombre del archivo
 MODEL_PATH         # ruta absoluta al GGUF
-BACKEND            # metadata descriptiva; no selecciona el runtime
-CONTAINER          # metadata descriptiva
+BACKEND            # gufo o llama.cpp/ROCm/Vulkan/RADV/Vulkan
+CONTAINER          # llama.cpp: contenedor por defecto para instancias por perfil
 RUNTIME_CONTAINER  # opcional; sustituye el contenedor de la instancia
 SERVER_PATH        # opcional; ruta absoluta del ejecutable dentro del contenedor
+HIP_LAUNCH_BLOCKING # opcional; 0/1 → variable de entorno del servidor
 CONTEXT_SIZE
 GPU_LAYERS
 PARALLEL_SLOTS
@@ -32,12 +33,16 @@ JINJA              # opcional; on/off → --jinja/--no-jinja
 REASONING          # opcional; on/off → --reasoning
 REASONING_PRESERVE # opcional; on añade --reasoning-preserve; off lo omite
 HOST
-PORT
+PORT               # puerto efectivo en el host para cualquier instancia/backend
+GUFO_IMAGE         # Gufo: referencia local por tag o digest
+CONTAINER_PORT     # Gufo: puerto dentro del contenedor
+SESSIONS           # Gufo: sesiones; no equivale a PARALLEL_SLOTS de llama.cpp
 ```
 
 El perfil se valida antes de iniciar: valores numéricos, host y puerto, ruta de
-modelo y las claves obligatorias. El contenedor efectivo se comprueba además durante
-`evo-model start` y `restart` mediante `distrobox list`. Si se define
+modelo y las claves obligatorias. Para llama.cpp, el contenedor efectivo se comprueba durante
+`evo-model start` y `restart` mediante `distrobox list`. Gufo comprueba Podman
+rootless y que la imagen esté disponible localmente. Si se define
 `DRAFT_MODEL_PATH`, debe ser una ruta absoluta a un GGUF existente y puede ir
 acompañado de `DRAFT_GPU_LAYERS`, un entero no negativo. Si se omite, no se
 pasa `--spec-draft-ngl`. `DRAFT_MODEL_PATH` usa `--spec-draft-model`, alias de `-md`.
@@ -48,10 +53,17 @@ No incluir GGUF, tokens, credenciales ni argumentos arbitrarios de shell en
 estos ficheros. Para añadir un flag soportado de llama.cpp se amplía de forma
 explícita el esquema y la construcción de argumentos en `scripts/evo-model`.
 
+Para pasar `HIP_LAUNCH_BLOCKING` al servidor, añadir `HIP_LAUNCH_BLOCKING=1`
+al perfil correspondiente (`0` también es válido). El gestor la pasa mediante
+`env` dentro del contenedor, antes del ejecutable. Si se omite, no añade ninguna
+asignación de esta variable al comando. No es un flag de llama.cpp ni selecciona
+el backend; la build y el contenedor deben ser compatibles con HIP.
+
 Por defecto, `worker` usa `llama-vulkan-worker` y `agent` usa
 `llama-vulkan-radv`. `RUNTIME_CONTAINER` permite elegir otro contenedor.
-`CONTAINER` y `BACKEND` son metadata descriptiva. El puerto efectivo es el de
-la instancia: worker 8080, agent 8081.
+`BACKEND=gufo` selecciona Podman; los backends ROCm/Vulkan conservan Distrobox.
+Las instancias con nombre de perfil usan `RUNTIME_CONTAINER`, o `CONTAINER` si
+se omite. El puerto efectivo siempre es `PORT`, también para worker y agent.
 
 Las claves nuevas no añaden argumentos si están ausentes. Los tipos de caché
 admitidos son `f32`, `f16`, `bf16`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`
@@ -95,27 +107,28 @@ solo cuando la relación es clara.
 `q8_0`, Jinja, reasoning y `draft-mtp` con máximo 3 tokens, sin draft externo.
 Selecciona el binario `/home/evo/strix-llama.cpp/build/bin/llama-server`
 dentro del contenedor Distrobox `llama-vulkan-worker`.
-Su `PORT=8082` conserva el comando original, pero el gestor lo sustituye por
-8080 en `worker` o 8081 en `agent`; no reproduce la escucha original en 8082.
+Su `PORT=8082` se respeta también al usar worker o agent.
 La validación del perfil no comprueba la compatibilidad de la build ni el
 arranque del modelo.
 
-Qwen3.8 Flash tiene el perfil experimental `qwen38-flash`, con el primer
-shard UD-IQ4_XS, contexto 131072, caché Q8_0 y MTP externo con
-`mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf` y máximo 2 tokens draft. No activa
-draft adaptativo ni fija mínimo, p-min o capas GPU del draft. Las claves SPEC_DRAFT_ADAPTIVE y SPEC_DRAFT_N_MIN requieren SPEC_TYPE.
-Usa `RUNTIME_CONTAINER=llama-vulkan-test` y
-`SERVER_PATH=/home/evo/strix-llama.cpp/build/bin/llama-server` para seleccionar
-su build específica. Sin `SERVER_PATH`, se ejecuta `llama-server` desde el
-PATH del contenedor.
-Tras actualizar la instalación con `./install.sh`, se lanza en el puerto 8081:
+`qwen38-flash` conserva el backend ROCm, el contenedor `llama-rocm-strix`
+y `/usr/local/bin/llama-server` como fallback explícito. No se cambia ni se
+selecciona automáticamente al fallar Gufo.
 
-```bash
-evo-model start agent qwen38-flash
-```
+`qwen38-flash-gufo` usa Gufo 0.13.0, Q4_K_XL, MTP externo, contexto 131072 y
+3 sesiones. `PORT=8082` es un valor inicial de prueba, editable; el puerto
+interno se declara con `CONTAINER_PORT=8081`. `GUFO_IMAGE` está fijada al digest
+inspeccionado localmente; admite tags y digests, sin descargar automáticamente.
 
-El soporte del gestor está implementado; la compatibilidad y estabilidad de
-esa build experimental deben comprobarse al ejecutarla.
+Para Gufo son obligatorias `PROFILE_NAME`, `BACKEND`, `MODEL_PATH`,
+`CONTEXT_SIZE`, `SESSIONS`, `HOST`, `PORT`, `GUFO_IMAGE` y `CONTAINER_PORT`.
+`SPEC_TYPE=mtp` requiere `DRAFT_MODEL_PATH`; ambos se pueden omitir para no usar
+speculative decoding. Las claves exclusivas de llama.cpp se rechazan en Gufo,
+incluidas `GPU_LAYERS`, `PARALLEL_SLOTS`, `CONTAINER` y `RUNTIME_CONTAINER`.
+El nombre del contenedor Gufo lo genera el gestor a partir de la instancia.
+Las rutas con espacios están soportadas; las rutas Gufo con `:` se rechazan.
+
+Véase [operación y pruebas de Gufo](../../docs/gufo.md).
 
 El sidecar Eagle3 de GPT-OSS y el FastMTP de la variante Qwen3.8 Aggressive no
 se activan: su configuración/runtime compatible no está confirmada para esta

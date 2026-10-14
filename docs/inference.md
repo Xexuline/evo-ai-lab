@@ -2,14 +2,14 @@
 
 ## Estado actual
 
-`evo-model` administra dos instancias locales independientes: `worker` en el
-puerto 8080 y `agent` en el 8081. Un PROFILE describe modelo/runtime; una
-INSTANCE determina el servicio, estado y puerto efectivo. Ambas APIs de
-llama-server siguen siendo OpenAI-compatible y se consumen directamente. El
-N150 continuará como control plane; esta fase no implementa SSH ni control remoto.
+`evo-model` administra instancias independientes de llama.cpp y Gufo. Un
+PROFILE configura modelo/backend; una INSTANCE identifica servicio y estado.
+`worker` y `agent` siguen disponibles, y `start <profile>` crea una instancia
+con el nombre del perfil para cualquier backend. El puerto efectivo siempre
+es `PORT` del perfil. Véase [Gufo](gufo.md) para configuración y fallback ROCm.
 
-Las unidades systemd de usuario gestionadas son `evo-model@worker.service` y
-`evo-model@agent.service`. Cada una lee exclusivamente la selección de su
+Las unidades systemd de usuario siguen la plantilla `evo-model@<instance>.service`,
+incluidas `evo-model@worker.service` y `evo-model@agent.service`. Cada una lee exclusivamente la selección de su
 instancia y puede ejecutar un perfil distinto. El perfil inicial documentado,
 [`qwen38-q4`](../config/models/qwen38-q4.conf), entra en
 `llama-vulkan-radv` y arranca `llama-server` con estos parámetros cuando se
@@ -71,7 +71,7 @@ consultar una sola instancia (`evo-model status worker --json`). Por ejemplo:
 {"instances":{"worker":{"context_total":131072,"parallel_slots":2,"context_per_slot":65536}}}
 ```
 
-Usamos systemd para que el proceso tenga ciclo de vida declarativo, reinicio ante fallo y logs centralizados. Usamos Distrobox como runtime para fijar el stack de inferencia sin instalarlo directamente en el host.
+Usamos systemd para que el proceso tenga ciclo de vida declarativo, reinicio ante fallo y logs centralizados. Usamos Distrobox para llama.cpp y contenedores Podman rootless propios para Gufo.
 
 ## Comprobación funcional
 

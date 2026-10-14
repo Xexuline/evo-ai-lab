@@ -14,8 +14,10 @@ El N150 existe y cumple el papel de control plane, pero no fue inspeccionado ni 
 ## Decisión
 
 El EVO concentra RAM, ancho de banda y la iGPU que necesita la inferencia.
-`evo-model`, desplegado localmente, controla hasta dos instancias de inferencia
-mediante systemd y Distrobox: `worker` (8080) y `agent` (8081). Mantener los servicios auxiliares en el
+`evo-model`, desplegado localmente, controla instancias de inferencia
+mediante systemd: llama.cpp usa Distrobox y Gufo usa Podman rootless.
+Se mantienen `worker` y `agent`, y se admiten instancias con nombre de perfil.
+El puerto efectivo lo define `PORT` en el perfil. Mantener los servicios auxiliares en el
 N150 reduce la competencia por esos recursos y simplifica el diagnóstico del
 nodo de cómputo. El N150 puede consumir la API OpenAI-compatible del EVO por
 LAN; el control remoto completo de cambios de modelo es una integración futura.

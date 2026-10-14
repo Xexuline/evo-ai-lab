@@ -28,12 +28,14 @@ _evo_model_completion() {
       ;;
     status|stop|restart)
       (( COMP_CWORD == 2 )) || return 0
-      COMPREPLY=( $(compgen -W 'worker agent' -- "$current") )
+      profiles=$(command evo-model list 2>/dev/null | awk '{print $1}')
+      COMPREPLY=( $(compgen -W "worker agent $profiles" -- "$current") )
       ;;
     logs)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W 'worker agent -f --follow' -- "$current") )
-      elif (( COMP_CWORD == 3 )) && [[ ${COMP_WORDS[2]} == worker || ${COMP_WORDS[2]} == agent ]]; then
+        profiles=$(command evo-model list 2>/dev/null | awk '{print $1}')
+        COMPREPLY=( $(compgen -W "worker agent $profiles -f --follow" -- "$current") )
+      elif (( COMP_CWORD == 3 )); then
         COMPREPLY=( $(compgen -W '-f --follow' -- "$current") )
       fi
       ;;

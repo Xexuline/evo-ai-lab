@@ -300,7 +300,15 @@ EOF
 diff -u "$TEMP_DIR/expected-draft-args" "$TEMP_DIR/draft-args"
 
 # Flash uses its experimental runtime and exactly the requested server flags.
+# Normalize tunable settings so local profile changes do not invalidate this fixture.
 sed -e "s|^MODEL_PATH=.*|MODEL_PATH=$MODEL_FILE|" -e "s|^DRAFT_MODEL_PATH=.*|DRAFT_MODEL_PATH=$DRAFT_FILE|" "$ROOT_DIR/config/models/qwen38-flash.conf" > "$PROFILE_DIR/qwen38-flash.conf"
+sed -i -e 's/^CONTEXT_SIZE=.*/CONTEXT_SIZE=131072/' \
+    -e 's/^PARALLEL_SLOTS=.*/PARALLEL_SLOTS=1/' \
+    -e 's/^SPEC_DRAFT_N_MAX=.*/SPEC_DRAFT_N_MAX=2/' \
+    -e 's/^RUNTIME_CONTAINER=.*/RUNTIME_CONTAINER=llama-vulkan-test/' \
+    -e 's|^SERVER_PATH=.*|SERVER_PATH=/home/evo/strix-llama.cpp/build/bin/llama-server|' \
+    -e '/^HIP_LAUNCH_BLOCKING=/d' -e '/^SPEC_DRAFT_ADAPTIVE=/d' \
+    "$PROFILE_DIR/qwen38-flash.conf"
 run_manager --validate-profile qwen38-flash >/dev/null
 mkdir -p "$STATE_DIR/agent"
 printf 'qwen38-flash\n' > "$STATE_DIR/agent/selected-profile"
@@ -399,6 +407,38 @@ assert Path(sys.argv[1]).read_text().splitlines() == [
 ]
 PYTEST
 
+# HIP settings are opt-in and reach the server inside the container.
+for value in 0 1; do
+  sed 's/^PROFILE_NAME=.*/PROFILE_NAME=hip/' "$PROFILE_DIR/minimal.conf" > "$PROFILE_DIR/hip.conf"
+  printf 'HIP_LAUNCH_BLOCKING=%s\n' "$value" >> "$PROFILE_DIR/hip.conf"
+  printf 'hip\n' > "$STATE_DIR/agent/selected-profile"
+  EVO_MODEL_TEST_ARGS="$TEMP_DIR/hip-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+  python3 - "$TEMP_DIR/hip-args" "$TEMP_DIR/minimal-args" "$value" <<'PYTEST'
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_text().splitlines()
+original = Path(sys.argv[2]).read_text().splitlines()
+assert args == original[:3] + ["env", "HIP_LAUNCH_BLOCKING=" + sys.argv[3]] + original[3:]
+PYTEST
+done
+for value in '' 2 -1 on '1;touch injected'; do
+  sed 's/^PROFILE_NAME=.*/PROFILE_NAME=bad-hip/' "$PROFILE_DIR/minimal.conf" > "$PROFILE_DIR/bad-hip.conf"
+  printf 'HIP_LAUNCH_BLOCKING=%s\n' "$value" >> "$PROFILE_DIR/bad-hip.conf"
+  if run_manager --validate-profile bad-hip >/dev/null 2>&1; then
+    echo "expected invalid HIP_LAUNCH_BLOCKING to fail: $value" >&2
+    exit 1
+  fi
+done
+printf 'HIP_LAUNCH_BLOCKING=0\n' >> "$PROFILE_DIR/hip.conf"
+if run_manager --validate-profile hip >/dev/null 2>&1; then
+  echo "expected duplicate HIP_LAUNCH_BLOCKING to fail" >&2
+  exit 1
+fi
+# Selecting a profile without the key restores the original command.
+printf 'minimal\n' > "$STATE_DIR/agent/selected-profile"
+EVO_MODEL_TEST_ARGS="$TEMP_DIR/after-hip-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
+diff -u "$TEMP_DIR/minimal-args" "$TEMP_DIR/after-hip-args"
+
 # N_MAX remains mandatory with SPEC_TYPE; P_MIN may use the runtime default.
 # Both are validated whenever supplied.
 for key in SPEC_DRAFT_N_MAX SPEC_DRAFT_P_MIN; do
@@ -452,7 +492,7 @@ EOF
 chmod +x "$FAKE_BIN/ss"
 
 legacy_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime good)
-grep -Fxq 'Runtime available for worker: llama-vulkan-worker' <<<"$legacy_runtime_output"
+grep -Fxq 'Runtime available for good: llama-vulkan-radv' <<<"$legacy_runtime_output"
 worker_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime worker good)
 grep -Fxq 'Runtime available for worker: llama-vulkan-worker' <<<"$worker_runtime_output"
 agent_runtime_output=$(PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime agent good)
@@ -483,7 +523,7 @@ PORT=1
 EOF
 # Runtime validation resolves the container from the instance, not profile
 # metadata, so this valid-but-unavailable profile container does not matter.
-PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime partial-container >/dev/null
+PATH="$FAKE_BIN:$PATH" run_manager --validate-runtime worker partial-container >/dev/null
 
 cat > "$FAKE_BIN/systemctl" <<'EOF'
 #!/usr/bin/env bash
@@ -594,7 +634,7 @@ fi
 printf '{"data":[{"id":"model.gguf"}]}'
 EOF
 chmod +x "$FAKE_BIN/curl"
-EVO_MODEL_TEST_CURL_COUNTER="$TEMP_DIR/curl-counter" PATH="$FAKE_BIN:$PATH" run_manager start good >"$TEMP_DIR/loading-output" 2>&1
+EVO_MODEL_TEST_CURL_COUNTER="$TEMP_DIR/curl-counter" PATH="$FAKE_BIN:$PATH" run_manager start worker good >"$TEMP_DIR/loading-output" 2>&1
 if grep -q 'curl: transient test failure' "$TEMP_DIR/loading-output"; then
   echo "transient curl error was shown to the user" >&2
   exit 1
@@ -621,7 +661,7 @@ printf 'curl: timeout test failure\n' >&2
 exit 7
 EOF
 chmod +x "$FAKE_BIN/curl"
-if PATH="$FAKE_BIN:$PATH" EVO_MODEL_HEALTH_TIMEOUT=1 run_manager start good >"$TEMP_DIR/timeout-output" 2>&1; then
+if PATH="$FAKE_BIN:$PATH" EVO_MODEL_HEALTH_TIMEOUT=1 run_manager start worker good >"$TEMP_DIR/timeout-output" 2>&1; then
   echo "expected health check timeout to fail" >&2
   exit 1
 fi
@@ -643,15 +683,14 @@ if [[ "$*" == *"is-active"* ]]; then
   [[ -f "$counter_file" ]] && count=$(<"$counter_file")
   count=$((count + 1))
   printf '%s\n' "$count" > "$counter_file"
-  # start: active; wait loop: active; health before curl: active;
-  # health after curl: inactive.
-  [[ "$count" -lt 4 ]]
+  # wait loop: active; health before curl: active; health after curl: inactive.
+  [[ "$count" -lt 3 ]]
   exit
 fi
 exit 0
 EOF
 chmod +x "$FAKE_BIN/systemctl" "$FAKE_BIN/curl"
-if EVO_MODEL_TEST_COUNTER="$TEMP_DIR/systemctl-count" PATH="$FAKE_BIN:$PATH" EVO_MODEL_HEALTH_TIMEOUT=5 run_manager start good >"$TEMP_DIR/health-output" 2>&1; then
+if EVO_MODEL_TEST_COUNTER="$TEMP_DIR/systemctl-count" PATH="$FAKE_BIN:$PATH" EVO_MODEL_HEALTH_TIMEOUT=5 run_manager start worker good >"$TEMP_DIR/health-output" 2>&1; then
   echo "expected health check to fail after the service becomes inactive" >&2
   exit 1
 fi
@@ -660,7 +699,7 @@ if grep -q 'API ready' "$TEMP_DIR/health-output"; then
   exit 1
 fi
 
-# Named instances keep selections separate, override the profile port, and
+# Named instances keep selections separate, respect the profile port, and
 # retain the old global selection as worker state on first use.
 rm -rf "$STATE_DIR"
 mkdir -p "$STATE_DIR"
@@ -671,7 +710,7 @@ mkdir -p "$STATE_DIR/agent"
 printf 'external-draft\n' > "$STATE_DIR/agent/selected-profile"
 EVO_MODEL_TEST_ARGS="$TEMP_DIR/agent-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected agent
 grep -Fxq 'llama-vulkan-radv' "$TEMP_DIR/agent-args"
-grep -Fxq -- '8081' "$TEMP_DIR/agent-args"
+grep -Fxq -- '8080' "$TEMP_DIR/agent-args"
 EVO_MODEL_TEST_ARGS="$TEMP_DIR/worker-args" PATH="$FAKE_BIN:$PATH" run_manager run-selected worker
 grep -Fxq 'llama-vulkan-worker' "$TEMP_DIR/worker-args"
 if grep -q 'llama-vulkan-radv' "$TEMP_DIR/worker-args"; then
@@ -688,7 +727,7 @@ EVO_MODEL_TEST_COUNTER="$TEMP_DIR/two-status-count" PATH="$FAKE_BIN:$PATH" run_m
 grep -Fq 'Instance: worker' "$TEMP_DIR/two-status"
 grep -Fq 'Instance: agent' "$TEMP_DIR/two-status"
 grep -Fq 'Port: 8080' "$TEMP_DIR/two-status"
-grep -Fq 'Port: 8081' "$TEMP_DIR/two-status"
+grep -Fq 'Port: 8080' "$TEMP_DIR/two-status"
 grep -Fq 'Container: llama-vulkan-worker' "$TEMP_DIR/two-status"
 grep -Fq 'Container: llama-vulkan-radv' "$TEMP_DIR/two-status"
 if PATH="$FAKE_BIN:$PATH" run_manager status invalid >/dev/null 2>&1; then
